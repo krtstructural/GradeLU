@@ -27,7 +27,7 @@ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylt-Hyjc00PgQp
    ===================================================================== */
 window.storage = {
   async get(key, shared) {
-    const res = await fetch(`${IPT_URL}?key=${encodeURIComponent(key)}`);
+    const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (data.value === null || data.value === undefined || data.value === "") {
