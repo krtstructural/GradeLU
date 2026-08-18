@@ -54,7 +54,7 @@ window.storage = {
 };
 </script>
 
-<script type="text/babel" data-presets="react">
+<script type="text/plain" id="app-source">
 const { useState, useEffect, Fragment } = React;
 
 /* ---- Lightweight inline icon components (replacing lucide-react, which needs a bundler) ---- */
@@ -1462,6 +1462,28 @@ function GradeLookup() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<GradeLookup />);
+</script>
+
+<script>
+  // Manually transform with the CLASSIC JSX runtime (React.createElement).
+  // The declarative type="text/babel" auto-run defaults to the "automatic" runtime in
+  // recent Babel standalone versions, which tries to `import` react/jsx-runtime as an
+  // ES module - that fails silently in a plain script context with no module loader,
+  // leaving the page blank (just the background color, no app). This avoids that.
+  const source = document.getElementById("app-source").textContent;
+  try {
+    const transformed = Babel.transform(source, {
+      presets: [["react", { runtime: "classic" }]],
+    }).code;
+    (0, eval)(transformed);
+  } catch (err) {
+    document.getElementById("root").innerHTML =
+      '<div style="color:white;font-family:sans-serif;padding:24px;max-width:500px;margin:0 auto;">' +
+      '<h2>Something failed to load</h2><p style="opacity:0.8;font-size:13px;">' +
+      (err && err.message ? err.message : String(err)) +
+      "</p></div>";
+    console.error(err);
+  }
 </script>
 </body>
 </html>
