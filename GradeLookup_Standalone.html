@@ -18,7 +18,7 @@
 /* =====================================================================
    CONFIG - paste your deployed Google Apps Script Web App URL below
    ===================================================================== */
-const APPS_SCRIPT_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylt-Hyjc00PgQphvjvYNcOTYXl7iBTqvLo4quQLeQWgX8x_kU1pjTZaimv7WK3U82tpw/exec";
 
 /* =====================================================================
    window.storage polyfill - talks to the Google Sheet via Apps Script
@@ -27,7 +27,7 @@ const APPS_SCRIPT_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
    ===================================================================== */
 window.storage = {
   async get(key, shared) {
-    const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
+    const res = await fetch(`${IPT_URL}?key=${encodeURIComponent(key)}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     if (data.value === null || data.value === undefined || data.value === "") {
