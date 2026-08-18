@@ -288,6 +288,13 @@ function ordinal(n) {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+function formatRank(entry) {
+  if (entry === null || entry === undefined) return null;
+  const rank = typeof entry === "number" ? entry : entry.rank;
+  const rankEnd = typeof entry === "number" ? entry : entry.rankEnd;
+  return rankEnd !== rank ? `${ordinal(rank)}-${ordinal(rankEnd)}` : ordinal(rank);
+}
+
 function avg(arr) {
   const vals = arr.filter((v) => v !== null && v !== undefined && v !== "" && !isNaN(v)).map(Number);
   if (vals.length === 0) return null;
@@ -505,6 +512,7 @@ function GradeLookup() {
   const [pinInput, setPinInput] = useState("");
   const [foundStudent, setFoundStudent] = useState(null);
   const [classRanks, setClassRanks] = useState(null);
+  const [instructorRankMap, setInstructorRankMap] = useState({});
   const [passInput, setPassInput] = useState("");
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -726,6 +734,13 @@ function GradeLookup() {
     setNames(namesMap);
     const cache = await buildDecryptedCache(classId, instructorSecret);
     setDecryptedCache(cache);
+    try {
+      const rRes = await window.storage.get(`ranks:${classId}`, true);
+      const parsed = rRes ? JSON.parse(rRes.value) : null;
+      setInstructorRankMap(parsed ? parsed.rankMap : {});
+    } catch (e) {
+      setInstructorRankMap({});
+    }
     setActionLoading(false);
     setView("instructorRoster");
   }
@@ -1112,6 +1127,7 @@ function GradeLookup() {
       });
       const payload = { rankMap, total: withAvg.length, publishedAt: new Date().toISOString() };
       await window.storage.set(`ranks:${currentClassId}`, JSON.stringify(payload), true);
+      setInstructorRankMap(rankMap);
       return withAvg.length;
     } catch (e) {
       return null;
@@ -1858,6 +1874,12 @@ function GradeLookup() {
                               <div className="text-[10px] text-gray-400">Term Avg</div>
                               <div className="font-bold text-sm" style={{ color: gradeColor(term) }}>{term === null ? "—" : `${term.toFixed(1)}%`}</div>
                             </div>
+                            {instructorRankMap[s.id] && (
+                              <div className="text-right pl-2 border-l" style={{ borderColor: "#eee" }}>
+                                <div className="text-[10px] text-gray-400">Rank</div>
+                                <div className="font-bold text-sm" style={{ color: AMBER_DEEP }}>{formatRank(instructorRankMap[s.id])}</div>
+                              </div>
+                            )}
                             {isOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
                           </div>
                         </button>
@@ -1927,6 +1949,7 @@ function GradeLookup() {
                           );
                         })}
                         <th className="text-right px-3 py-2.5 text-white font-bold" style={{ backgroundColor: AMBER_DEEP, color: NAVY }}>Term Avg</th>
+                        <th className="text-right px-3 py-2.5 text-white font-bold">Rank</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1959,11 +1982,14 @@ function GradeLookup() {
                             <td className="px-3 py-2 text-right font-bold" style={{ color: gradeColor(term), backgroundColor: "#FDF3DC" }}>
                               {term === null ? "—" : `${term.toFixed(1)}%`}
                             </td>
+                            <td className="px-3 py-2 text-right font-semibold" style={{ color: NAVY }}>
+                              {formatRank(instructorRankMap[s.id]) || <span className="text-gray-300 font-normal">—</span>}
+                            </td>
                           </tr>
                         );
                       })}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={26} className="text-center py-8 text-gray-300">No matches.</td></tr>
+                        <tr><td colSpan={27} className="text-center py-8 text-gray-300">No matches.</td></tr>
                       )}
                     </tbody>
                   </table>
