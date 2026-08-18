@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Theory of Structures - Grade Lookup</title>
+<title>Kairos - Grade Lookup</title>
 <link rel="icon" href="data:,">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -86,7 +86,6 @@ const LayoutDashboard = makeIcon(<><rect x="3" y="3" width="7" height="9" rx="1"
 const Search = makeIcon(<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>);
 const Settings2 = makeIcon(<><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></>);
 const GripVertical = makeIcon(<><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></>);
-
 
 const NAVY = "#7A0C1F"; // MLQU maroon
 const NAVY_DEEP = "#4A0712"; // deeper maroon for gradients
@@ -192,21 +191,59 @@ const EXAM_LABELS = ["Prelim", "Midterm", "Final"];
 const PERIODS = ["Prelim", "Midterm", "Final"];
 const PERIOD_COLORS = [STEEL, AMBER_DEEP, NAVY];
 const PERIOD_WEIGHTS = [0.3, 0.3, 0.4]; // Prelim 30% / Midterm 30% / Final 40%
+const CATEGORY_COLOR_PALETTE = [AMBER_DEEP, STEEL, "#8E5B9E", "#3A8F6B", "#C2694A", "#2E6E8E"];
+function categoryColor(index) {
+  return CATEGORY_COLOR_PALETTE[index % CATEGORY_COLOR_PALETTE.length];
+}
+
+// Readable (not neon) traffic-light colors for grade values: >80 green, 75-80 orange, <75 red.
+const GRADE_GREEN = "#2E7D4F";
+const GRADE_ORANGE = "#C2760F";
+const GRADE_RED = "#C23B3B";
+function gradeColor(value) {
+  if (value === null || value === undefined) return "#9CA3AF";
+  if (value > 80) return GRADE_GREEN;
+  if (value >= 75) return GRADE_ORANGE;
+  return GRADE_RED;
+}
+
+// Default grading structure - seeded once into shared storage on first run.
+// After that, this is DATA, editable from Instructor > Manage Grading Structure.
+// examWeight + classStandingWeight must sum to 100. Each category's weight (within
+// Class Standing) must also sum to 100 across all categories.
+const DEFAULT_WEIGHT_CONFIG = {
+  default: {
+    examWeight: 40,
+    classStandingWeight: 60,
+    categories: [
+      { id: "quiz", label: "Quizzes", weight: 75 },
+      { id: "index", label: "IndEx", weight: 25 },
+    ],
+  },
+  // A period with a non-null entry here uses its OWN independent config instead of the shared default.
+  overrides: { 0: null, 1: null, 2: null },
+};
+
+// Resolves which config actually applies to a given period - its own override if set, else the shared default.
+function effectiveConfigForPeriod(weightConfig, periodIdx) {
+  return weightConfig.overrides[periodIdx] || weightConfig.default;
+}
 
 // Default assessments - seeded once into shared storage on first run.
-// After that, this list is DATA, editable from Instructor > Manage Assessments.
+// After that, this list is DATA, editable from Instructor > Manage Grading Structure.
+// categoryId links each item to one of the categories defined in the weight config above.
 const DEFAULT_ASSESSMENTS = [
-  { id: "q1", type: "quiz", label: "Quiz 1 — Unit 1", period: 0 },
-  { id: "q2", type: "quiz", label: "Quiz 2 — Unit 2", period: 0 },
-  { id: "q3", type: "quiz", label: "Quiz 3 — Units 3-5", period: 1 },
-  { id: "q4", type: "quiz", label: "Quiz 4 — Units 6-7", period: 2 },
-  { id: "q5", type: "quiz", label: "Quiz 5 — Units 8-9", period: 2 },
-  { id: "idx1", type: "index", label: "IndEx 1 — Units 1-4", period: 0 },
-  { id: "idx2", type: "index", label: "IndEx 2 — Unit 5", period: 1 },
-  { id: "idx3", type: "index", label: "IndEx 3 — Unit 6a", period: 1 },
-  { id: "idx4", type: "index", label: "IndEx 4 — Unit 6b-7", period: 2 },
-  { id: "idx5", type: "index", label: "IndEx 5 — Units 8-9", period: 2 },
-  { id: "idx6", type: "index", label: "IndEx 6 — Units 10-11", period: 2 },
+  { id: "q1", categoryId: "quiz", label: "Quiz 1 — Unit 1", period: 0 },
+  { id: "q2", categoryId: "quiz", label: "Quiz 2 — Unit 2", period: 0 },
+  { id: "q3", categoryId: "quiz", label: "Quiz 3 — Units 3-5", period: 1 },
+  { id: "q4", categoryId: "quiz", label: "Quiz 4 — Units 6-7", period: 2 },
+  { id: "q5", categoryId: "quiz", label: "Quiz 5 — Units 8-9", period: 2 },
+  { id: "idx1", categoryId: "index", label: "IndEx 1 — Units 1-4", period: 0 },
+  { id: "idx2", categoryId: "index", label: "IndEx 2 — Unit 5", period: 1 },
+  { id: "idx3", categoryId: "index", label: "IndEx 3 — Unit 6a", period: 1 },
+  { id: "idx4", categoryId: "index", label: "IndEx 4 — Unit 6b-7", period: 2 },
+  { id: "idx5", categoryId: "index", label: "IndEx 5 — Units 8-9", period: 2 },
+  { id: "idx6", categoryId: "index", label: "IndEx 6 — Units 10-11", period: 2 },
 ];
 
 function newId(prefix) {
@@ -245,6 +282,12 @@ async function hashStudentPins(list) {
   );
 }
 
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 function avg(arr) {
   const vals = arr.filter((v) => v !== null && v !== undefined && v !== "" && !isNaN(v)).map(Number);
   if (vals.length === 0) return null;
@@ -256,36 +299,41 @@ function clampNum(v) {
   return Math.max(0, Math.min(100, Number(v)));
 }
 
-function assessmentsInPeriod(assessments, type, period) {
-  return assessments.filter((a) => a.type === type && a.period === period);
+function assessmentsInPeriod(assessments, categoryId, period) {
+  return assessments.filter((a) => a.categoryId === categoryId && a.period === period);
 }
 
 // Compute grade for ONE period (0=Prelim, 1=Midterm, 2=Final).
-// Step 1: Class Standing = 75% Quiz avg + 25% IndEx avg
-// Step 2: Period Grade = 40% Exam + 60% Class Standing
-// (Numerically identical to the flat 40/45/15 split: 0.6 x 0.75 = 0.45, 0.6 x 0.25 = 0.15)
-function computePeriodGrade(student, periodIdx, assessments) {
+// Step 1: Class Standing = weighted sum across however many categories are configured
+//         (e.g. Quizzes 75% + IndEx 25%, or Quizzes 50% + IndEx 20% + Recitation 30%, etc.)
+// Step 2: Period Grade = (examWeight%) Exam + (classStandingWeight%) Class Standing
+// Missing categories/exam contribute nothing (not renormalized) - same "shows partial progress
+// so far" philosophy as before, just generalized to any number of categories with any weights.
+function computePeriodGrade(student, periodIdx, assessments, weightConfig) {
+  const cfg = effectiveConfigForPeriod(weightConfig, periodIdx);
   const examScore = student.exams[periodIdx];
-  const quizItems = assessmentsInPeriod(assessments, "quiz", periodIdx);
-  const idxItems = assessmentsInPeriod(assessments, "index", periodIdx);
-  const quizAvg = avg(quizItems.map((a) => student.scores[a.id]));
-  const idxAvg = avg(idxItems.map((a) => student.scores[a.id]));
+  const categoryData = cfg.categories.map((cat) => {
+    const items = assessmentsInPeriod(assessments, cat.id, periodIdx);
+    const average = avg(items.map((a) => student.scores[a.id]));
+    return { id: cat.id, label: cat.label, weight: cat.weight, items, average };
+  });
 
   let classStanding = 0, csHasAny = false;
-  if (quizAvg !== null) { classStanding += quizAvg * 0.75; csHasAny = true; }
-  if (idxAvg !== null) { classStanding += idxAvg * 0.25; csHasAny = true; }
+  categoryData.forEach((c) => {
+    if (c.average !== null) { classStanding += c.average * (c.weight / 100); csHasAny = true; }
+  });
   classStanding = csHasAny ? classStanding : null;
 
   let total = 0, hasAny = false;
-  if (examScore !== null && examScore !== undefined) { total += examScore * 0.4; hasAny = true; }
-  if (classStanding !== null) { total += classStanding * 0.6; hasAny = true; }
+  if (examScore !== null && examScore !== undefined) { total += examScore * (cfg.examWeight / 100); hasAny = true; }
+  if (classStanding !== null) { total += classStanding * (cfg.classStandingWeight / 100); hasAny = true; }
   total = hasAny ? total : null;
 
-  return { examScore: examScore ?? null, quizAvg, idxAvg, classStanding, total, quizItems, idxItems };
+  return { examScore: examScore ?? null, classStanding, total, categoryData, cfg };
 }
 
-function computeTermAverage(student, assessments) {
-  const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(student, p, assessments).total);
+function computeTermAverage(student, assessments, weightConfig) {
+  const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(student, p, assessments, weightConfig).total);
   let weightedSum = 0, weightUsed = 0;
   periodGrades.forEach((g, i) => {
     if (g !== null) { weightedSum += g * PERIOD_WEIGHTS[i]; weightUsed += PERIOD_WEIGHTS[i]; }
@@ -295,13 +343,15 @@ function computeTermAverage(student, assessments) {
 }
 
 // Build the paste-import column header list dynamically from current assessments.
-function buildImportColumns(assessments) {
+function buildImportColumns(assessments, weightConfig) {
   const cols = ["Real Name", "Code Name", "PIN"];
   const map = []; // parallel array describing what each column maps to
   map.push({ k: "realName" }, { k: "codeName" }, { k: "pin" });
   for (let p = 0; p < 3; p++) {
-    assessmentsInPeriod(assessments, "quiz", p).forEach((a) => { cols.push(a.label); map.push({ k: "score", id: a.id }); });
-    assessmentsInPeriod(assessments, "index", p).forEach((a) => { cols.push(a.label); map.push({ k: "score", id: a.id }); });
+    const cfg = effectiveConfigForPeriod(weightConfig, p);
+    cfg.categories.forEach((cat) => {
+      assessmentsInPeriod(assessments, cat.id, p).forEach((a) => { cols.push(a.label); map.push({ k: "score", id: a.id }); });
+    });
     cols.push(`${EXAM_LABELS[p]} Exam`);
     map.push({ k: "exam", period: p });
   }
@@ -333,8 +383,8 @@ function buildRowDiff(row, existingPlain, assessments, isExisting) {
   return diffs;
 }
 
-function parseImportText(text, assessments) {
-  const { map } = buildImportColumns(assessments);
+function parseImportText(text, assessments, weightConfig) {
+  const { map } = buildImportColumns(assessments, weightConfig);
   const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   const rows = [];
   for (let line of lines) {
@@ -356,11 +406,7 @@ function parseImportText(text, assessments) {
 }
 
 function TrussDivider() {
-  return (
-    <svg viewBox="0 0 400 30" className="w-full h-6" preserveAspectRatio="none">
-      <polyline points="0,26 33,4 66,26 99,4 132,26 165,4 198,26 231,4 264,26 297,4 330,26 363,4 400,26" fill="none" stroke={AMBER} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.55" />
-    </svg>
-  );
+  return <div className="w-full h-px my-3" style={{ backgroundColor: "#EEE0C8" }} />;
 }
 
 function ScoreBar({ label, value, color }) {
@@ -377,10 +423,83 @@ function ScoreBar({ label, value, color }) {
   );
 }
 
+// Defined at module scope (not inside GradeLookup's render) so its identity stays stable
+// across re-renders - otherwise React treats it as a brand-new component on every keystroke
+// and remounts the inputs, which drops focus after each character typed.
+function WeightEditor({ scope, cfg, title, subtitle, scopeValidity, updateTopWeight, updateCategory, removeCategory, addCategory }) {
+  const v = scopeValidity(cfg);
+  return (
+    <>
+      <div className="bg-white rounded-2xl p-5">
+        <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>{title}</div>
+        {subtitle && <p className="text-xs text-gray-500 mb-3">{subtitle}</p>}
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-semibold mb-1 text-gray-500">Exam</label>
+            <div className="flex items-center border rounded-lg px-2 py-1.5" style={{ borderColor: "#ddd" }}>
+              <input type="number" min="0" max="100" value={cfg.examWeight}
+                onChange={(e) => updateTopWeight(scope, "examWeight", e.target.value)}
+                className="w-full text-sm outline-none" />
+              <span className="text-xs text-gray-400">%</span>
+            </div>
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs font-semibold mb-1 text-gray-500">Class Standing</label>
+            <div className="flex items-center border rounded-lg px-2 py-1.5" style={{ borderColor: "#ddd" }}>
+              <input type="number" min="0" max="100" value={cfg.classStandingWeight}
+                onChange={(e) => updateTopWeight(scope, "classStandingWeight", e.target.value)}
+                className="w-full text-sm outline-none" />
+              <span className="text-xs text-gray-400">%</span>
+            </div>
+          </div>
+        </div>
+        <div className="text-xs mt-2 font-semibold" style={{ color: v.topSum === 100 ? "#3A8F6B" : "#B23B3B" }}>
+          Total: {v.topSum}% {v.topSum === 100 ? "✓" : "— must equal 100%"}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5">
+        <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>Categories</div>
+        <p className="text-xs text-gray-500 mb-3">Weights must sum to exactly 100%.</p>
+        <div className="space-y-2">
+          {cfg.categories.map((c, ci) => (
+            <div key={c.id} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: categoryColor(ci) }} />
+              <input value={c.label} onChange={(e) => updateCategory(scope, c.id, "label", e.target.value)}
+                className="flex-1 border rounded-md px-2 py-1.5 text-sm outline-none" style={{ borderColor: "#ddd" }} />
+              <div className="flex items-center border rounded-md px-2 py-1.5 w-20" style={{ borderColor: "#ddd" }}>
+                <input type="number" min="0" max="100" value={c.weight}
+                  onChange={(e) => updateCategory(scope, c.id, "weight", e.target.value)}
+                  className="w-full text-xs outline-none" />
+                <span className="text-[10px] text-gray-400">%</span>
+              </div>
+              <button onClick={() => removeCategory(scope, c.id)} className="p-1.5 text-gray-300 hover:text-red-500 transition">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="text-xs mt-2 mb-2 font-semibold" style={{ color: v.catSum === 100 ? "#3A8F6B" : "#B23B3B" }}>
+          Total: {v.catSum}% {v.catSum === 100 ? "✓" : "— must equal 100%"}
+        </div>
+        <button onClick={() => addCategory(scope)} className="text-xs font-semibold flex items-center gap-1" style={{ color: NAVY }}>
+          <Plus size={13} /> Add Category
+        </button>
+      </div>
+    </>
+  );
+}
+
 function GradeLookup() {
   const [view, setView] = useState("landing");
+  const [classes, setClasses] = useState(null);
+  const [currentClassId, setCurrentClassId] = useState(null);
+  const [selectedClassForStudent, setSelectedClassForStudent] = useState("");
+  const [newClassName, setNewClassName] = useState("");
+  const [creatingClass, setCreatingClass] = useState(false);
   const [roster, setRoster] = useState(null);
   const [assessments, setAssessments] = useState(null);
+  const [weightConfig, setWeightConfig] = useState(null);
   const [error, setError] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [pinInput, setPinInput] = useState("");
@@ -394,6 +513,7 @@ function GradeLookup() {
   const [importMsg, setImportMsg] = useState("");
   const [dashSearch, setDashSearch] = useState("");
   const [assessDraft, setAssessDraft] = useState(null);
+  const [weightDraft, setWeightDraft] = useState(null);
   const [assessMsg, setAssessMsg] = useState("");
   const [names, setNames] = useState({});
   const [decryptedCache, setDecryptedCache] = useState({});
@@ -402,46 +522,51 @@ function GradeLookup() {
   const [expandedId, setExpandedId] = useState(null);
   const [expandedImportRow, setExpandedImportRow] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [rankMsg, setRankMsg] = useState("");
+  const [publishingRanks, setPublishingRanks] = useState(false);
 
   useEffect(() => {
     (async () => {
-      let a = DEFAULT_ASSESSMENTS;
+      let existingClasses = undefined;
       try {
-        const aRes = await window.storage.get("assessments", true);
-        if (aRes) a = JSON.parse(aRes.value);
-        else await window.storage.set("assessments", JSON.stringify(DEFAULT_ASSESSMENTS), true);
+        const clsRes = await window.storage.get("classes", true);
+        existingClasses = JSON.parse(clsRes.value);
       } catch (e) {
-        try { await window.storage.set("assessments", JSON.stringify(DEFAULT_ASSESSMENTS), true); } catch (e2) {}
+        existingClasses = undefined; // key not found (or any read issue) - treat as "not set up yet", not a fatal error
       }
-      setAssessments(a);
-
+      if (existingClasses !== undefined) {
+        setClasses(existingClasses);
+        return;
+      }
+      // No classes list yet - check for legacy single-class data (from before multi-class) to migrate.
       try {
-        const res = await window.storage.get("roster", true);
-        const raw = res ? JSON.parse(res.value) : [];
-        const migrated = raw.map(migrateStudent);
-        const hashed = await hashStudentPins(migrated);
-        // Strip real names out before they ever touch this browser's memory on a normal page load.
-        // Names live in a separate bucket, fetched only after the instructor passcode is verified.
-        const scrubbed = hashed.map(({ realName, ...rest }) => rest);
-        setRoster(scrubbed);
-        if (JSON.stringify(hashed) !== JSON.stringify(raw)) {
-          try {
-            const namesMap = {};
-            hashed.forEach((s) => { if (s.realName) namesMap[s.id] = s.realName; });
-            const existingNames = await window.storage.get("names", true).catch(() => null);
-            const mergedNames = existingNames ? { ...JSON.parse(existingNames.value), ...namesMap } : namesMap;
-            await window.storage.set("names", JSON.stringify(mergedNames), true);
-            await window.storage.set("roster", JSON.stringify(scrubbed), true);
-          } catch (e) {}
+        let legacyRoster = null;
+        try {
+          const r = await window.storage.get("roster", true);
+          legacyRoster = r ? JSON.parse(r.value) : null;
+        } catch (e) {}
+        if (legacyRoster !== null) {
+          const classId = newId("cls");
+          const [aRes, wRes, nRes] = await Promise.all([
+            window.storage.get("assessments", true).catch(() => null),
+            window.storage.get("weightConfig", true).catch(() => null),
+            window.storage.get("names", true).catch(() => null),
+          ]);
+          await window.storage.set(`roster:${classId}`, JSON.stringify(legacyRoster), true);
+          await window.storage.set(`assessments:${classId}`, aRes ? aRes.value : JSON.stringify(DEFAULT_ASSESSMENTS), true);
+          await window.storage.set(`weightConfig:${classId}`, wRes ? wRes.value : JSON.stringify(DEFAULT_WEIGHT_CONFIG), true);
+          await window.storage.set(`names:${classId}`, nRes ? nRes.value : "{}", true);
+          const newClasses = [{ id: classId, name: "My Class" }];
+          await window.storage.set("classes", JSON.stringify(newClasses), true);
+          setClasses(newClasses);
+        } else {
+          await window.storage.set("classes", JSON.stringify([]), true);
+          setClasses([]);
         }
       } catch (e) {
-        const msg = (e && e.message ? e.message : String(e)) || "";
-        const looksLikeMissingKey = /not.?found|404|no such key/i.test(msg);
-        setRoster([]);
-        if (!looksLikeMissingKey) {
-          // A genuine failure, not just "no roster saved yet" - surface it instead of silently showing empty.
-          setLoadError(`Could not load saved data (${msg || "unknown error"}). This is NOT the same as "no students yet" - try refreshing. If it keeps happening, the data may not be reaching this device.`);
-        }
+        setLoadError(`Could not set up your class list (${e && e.message ? e.message : String(e)}). Try refreshing - your existing data has not been changed.`);
+        setClasses([]);
       }
     })();
   }, []);
@@ -454,7 +579,7 @@ function GradeLookup() {
 
   async function loadNames() {
     try {
-      const res = await window.storage.get("names", true);
+      const res = await window.storage.get(`names:${currentClassId}`, true);
       return res ? JSON.parse(res.value) : {};
     } catch (e) {
       return {};
@@ -463,7 +588,7 @@ function GradeLookup() {
 
   async function saveNames(namesMap) {
     try {
-      await window.storage.set("names", JSON.stringify(namesMap), true);
+      await window.storage.set(`names:${currentClassId}`, JSON.stringify(namesMap), true);
     } catch (e) {}
   }
 
@@ -479,7 +604,7 @@ function GradeLookup() {
   async function persistRoster(next) {
     setRoster(next);
     try {
-      await window.storage.set("roster", JSON.stringify(next), true);
+      await window.storage.set(`roster:${currentClassId}`, JSON.stringify(next), true);
     } catch (e) {
       setSaveMsg("Save failed — check your connection and try again.");
     }
@@ -488,33 +613,201 @@ function GradeLookup() {
   async function persistAssessments(next) {
     setAssessments(next);
     try {
-      await window.storage.set("assessments", JSON.stringify(next), true);
+      await window.storage.set(`assessments:${currentClassId}`, JSON.stringify(next), true);
     } catch (e) {
       setAssessMsg("Save failed — check your connection and try again.");
     }
   }
 
+  async function persistWeightConfig(next) {
+    setWeightConfig(next);
+    try {
+      await window.storage.set(`weightConfig:${currentClassId}`, JSON.stringify(next), true);
+    } catch (e) {
+      setAssessMsg("Save failed — check your connection and try again.");
+    }
+  }
+
+  // Loads (and migrates/seeds if needed) one class's data - assessments, weight config, and roster.
+  // Used both when a student logs into a specific class and when the instructor selects one.
+  async function loadClassData(classId) {
+    let a = DEFAULT_ASSESSMENTS;
+    try {
+      const aRes = await window.storage.get(`assessments:${classId}`, true);
+      if (aRes) a = JSON.parse(aRes.value);
+      else await window.storage.set(`assessments:${classId}`, JSON.stringify(DEFAULT_ASSESSMENTS), true);
+    } catch (e) {
+      try { await window.storage.set(`assessments:${classId}`, JSON.stringify(DEFAULT_ASSESSMENTS), true); } catch (e2) {}
+    }
+    let needsAssessmentResave = false;
+    a = a.map((item) => {
+      if (item.categoryId) return item;
+      needsAssessmentResave = true;
+      const { type, ...rest } = item;
+      return { ...rest, categoryId: type };
+    });
+    if (needsAssessmentResave) {
+      try { await window.storage.set(`assessments:${classId}`, JSON.stringify(a), true); } catch (e) {}
+    }
+
+    let wc = DEFAULT_WEIGHT_CONFIG;
+    try {
+      const wRes = await window.storage.get(`weightConfig:${classId}`, true);
+      if (wRes) wc = JSON.parse(wRes.value);
+      else await window.storage.set(`weightConfig:${classId}`, JSON.stringify(DEFAULT_WEIGHT_CONFIG), true);
+    } catch (e) {
+      try { await window.storage.set(`weightConfig:${classId}`, JSON.stringify(DEFAULT_WEIGHT_CONFIG), true); } catch (e2) {}
+    }
+    if (!wc.default) {
+      wc = {
+        default: { examWeight: wc.examWeight, classStandingWeight: wc.classStandingWeight, categories: wc.categories },
+        overrides: { 0: null, 1: null, 2: null },
+      };
+      try { await window.storage.set(`weightConfig:${classId}`, JSON.stringify(wc), true); } catch (e) {}
+    }
+
+    let scrubbed = [];
+    try {
+      const res = await window.storage.get(`roster:${classId}`, true);
+      const raw = res ? JSON.parse(res.value) : [];
+      const migrated = raw.map(migrateStudent);
+      const hashed = await hashStudentPins(migrated);
+      scrubbed = hashed.map(({ realName, ...rest }) => rest);
+      if (JSON.stringify(hashed) !== JSON.stringify(raw)) {
+        try {
+          const namesMap = {};
+          hashed.forEach((s) => { if (s.realName) namesMap[s.id] = s.realName; });
+          const existingNames = await window.storage.get(`names:${classId}`, true).catch(() => null);
+          const mergedNames = existingNames ? { ...JSON.parse(existingNames.value), ...namesMap } : namesMap;
+          await window.storage.set(`names:${classId}`, JSON.stringify(mergedNames), true);
+          await window.storage.set(`roster:${classId}`, JSON.stringify(scrubbed), true);
+        } catch (e) {}
+      }
+    } catch (e) {
+      const msg = (e && e.message ? e.message : String(e)) || "";
+      const looksLikeMissingKey = /not.?found|404|no such key/i.test(msg);
+      scrubbed = [];
+      if (!looksLikeMissingKey) {
+        setLoadError(`Could not load this class's data (${msg || "unknown error"}). Try refreshing.`);
+      }
+    }
+
+    setAssessments(a);
+    setWeightConfig(wc);
+    setRoster(scrubbed);
+    setCurrentClassId(classId);
+  }
+
+  async function createClass() {
+    if (!newClassName.trim()) return;
+    setCreatingClass(true);
+    const classId = newId("cls");
+    try {
+      await window.storage.set(`assessments:${classId}`, JSON.stringify(DEFAULT_ASSESSMENTS), true);
+      await window.storage.set(`weightConfig:${classId}`, JSON.stringify(DEFAULT_WEIGHT_CONFIG), true);
+      await window.storage.set(`roster:${classId}`, JSON.stringify([]), true);
+      await window.storage.set(`names:${classId}`, JSON.stringify({}), true);
+      const nextClasses = [...classes, { id: classId, name: newClassName.trim() }];
+      await window.storage.set("classes", JSON.stringify(nextClasses), true);
+      setClasses(nextClasses);
+      setNewClassName("");
+      await selectClassAsInstructor(classId);
+    } catch (e) {
+      setLoadError("Could not create the class — check your connection and try again.");
+    }
+    setCreatingClass(false);
+  }
+
+  async function selectClassAsInstructor(classId) {
+    setActionLoading(true);
+    await loadClassData(classId);
+    const namesMap = await loadNamesFor(classId);
+    setNames(namesMap);
+    const cache = await buildDecryptedCache(classId, instructorSecret);
+    setDecryptedCache(cache);
+    setActionLoading(false);
+    setView("instructorRoster");
+  }
+
+  async function loadNamesFor(classId) {
+    try {
+      const res = await window.storage.get(`names:${classId}`, true);
+      return res ? JSON.parse(res.value) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  async function buildDecryptedCache(classId, secret) {
+    try {
+      const res = await window.storage.get(`roster:${classId}`, true);
+      const raw = res ? JSON.parse(res.value) : [];
+      const migrated = raw.map(migrateStudent);
+      const hashed = await hashStudentPins(migrated);
+      const wrapKey = await deriveWrapKey(secret, INSTRUCTOR_SALT);
+      const cache = {};
+      for (const s of hashed) {
+        if (s.encData) {
+          try {
+            const dek = await unwrapDEK(wrapKey, s.encInstructorKey);
+            cache[s.id] = await decryptJSON(dek, s.encData);
+          } catch (e) {
+            cache[s.id] = { exams: [null, null, null], scores: {} };
+          }
+        } else {
+          cache[s.id] = { exams: s.exams, scores: s.scores };
+        }
+      }
+      return cache;
+    } catch (e) {
+      return {};
+    }
+  }
+
+
   async function handleStudentLogin() {
     setError("");
-    const codeMatch = (roster || []).find((s) => s.codeName.trim().toLowerCase() === codeInput.trim().toLowerCase());
+    if (!selectedClassForStudent) {
+      setError("Please select your class.");
+      return;
+    }
     const pin = pinInput.trim();
-    if (!codeMatch || !pin) {
+    if (!codeInput.trim() || !pin) {
       setError("No match for that code name and PIN. Double-check both and try again.");
       return;
     }
+    setActionLoading(true);
     try {
+      await loadClassData(selectedClassForStudent);
+      const res = await window.storage.get(`roster:${selectedClassForStudent}`, true).catch(() => null);
+      const raw = res ? JSON.parse(res.value) : [];
+      const migrated = raw.map(migrateStudent);
+      const hashed = await hashStudentPins(migrated);
+      const codeMatch = hashed.find((s) => s.codeName.trim().toLowerCase() === codeInput.trim().toLowerCase());
+      if (!codeMatch) throw new Error("no code match");
+
+      let rankInfo = null;
+      try {
+        const rRes = await window.storage.get(`ranks:${selectedClassForStudent}`, true);
+        const parsed = rRes ? JSON.parse(rRes.value) : null;
+        if (parsed && parsed.rankMap && parsed.rankMap[codeMatch.id]) {
+          rankInfo = { rank: parsed.rankMap[codeMatch.id], total: parsed.total };
+        }
+      } catch (e) {} // ranks not published yet - fine, just omit
+
       if (codeMatch.encData) {
         const plain = await decryptWithPin(codeMatch, codeMatch.id, pin);
-        setFoundStudent({ id: codeMatch.id, codeName: codeMatch.codeName, ...plain });
+        setFoundStudent({ id: codeMatch.id, codeName: codeMatch.codeName, ...plain, ...(rankInfo || {}) });
       } else {
         const hash = await sha256Hex(pin);
         if (codeMatch.pinHash !== hash) throw new Error("mismatch");
-        setFoundStudent(codeMatch);
+        setFoundStudent({ ...codeMatch, ...(rankInfo || {}) });
       }
       setView("studentDashboard");
     } catch (e) {
       setError("No match for that code name and PIN. Double-check both and try again.");
     }
+    setActionLoading(false);
   }
 
   async function handleInstructorLogin() {
@@ -524,32 +817,16 @@ function GradeLookup() {
       setError("Incorrect passcode.");
       return;
     }
-    const secret = passInput;
-    const namesMap = await loadNames();
-    setNames(namesMap);
-    const cache = {};
-    const wrapKey = await deriveWrapKey(secret, INSTRUCTOR_SALT);
-    for (const s of roster) {
-      if (s.encData) {
-        try {
-          const dek = await unwrapDEK(wrapKey, s.encInstructorKey);
-          cache[s.id] = await decryptJSON(dek, s.encData);
-        } catch (e) {
-          cache[s.id] = { exams: [null, null, null], scores: {} };
-        }
-      } else {
-        cache[s.id] = { exams: s.exams, scores: s.scores };
-      }
-    }
-    setDecryptedCache(cache);
-    setInstructorSecret(secret);
-    setView("instructorRoster");
+    setInstructorSecret(passInput);
+    setView("instructorSelectClass");
   }
 
   function goToLanding() {
     setDecryptedCache({});
     setInstructorSecret("");
     setFoundStudent(null);
+    setCurrentClassId(null);
+    setSelectedClassForStudent("");
     setView("landing");
   }
 
@@ -600,10 +877,12 @@ function GradeLookup() {
     }
     const next = exists ? roster.map((s) => (s.id === finalStudent.id ? finalStudent : s)) : [...roster, finalStudent];
     await persistRoster(next);
-    setDecryptedCache((prev) => ({ ...prev, [finalStudent.id]: plainData }));
+    const nextCache = { ...decryptedCache, [finalStudent.id]: plainData };
+    setDecryptedCache(nextCache);
     const nextNames = { ...names, [finalStudent.id]: draft.realName };
     setNames(nextNames);
     await saveNames(nextNames);
+    await computeAndSaveRanks(next, nextCache);
     setSaving(false);
     setSaveMsg("Saved.");
     setTimeout(() => setSaveMsg(""), 1800);
@@ -617,11 +896,10 @@ function GradeLookup() {
     delete nextNames[id];
     setNames(nextNames);
     await saveNames(nextNames);
-    setDecryptedCache((prev) => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
+    const nextCache = { ...decryptedCache };
+    delete nextCache[id];
+    setDecryptedCache(nextCache);
+    await computeAndSaveRanks(next, nextCache);
   }
 
   function updateDraftExam(period, value) {
@@ -637,7 +915,7 @@ function GradeLookup() {
   }
 
   function handlePreviewImport() {
-    const rows = parseImportText(importText, assessments);
+    const rows = parseImportText(importText, assessments, weightConfig);
     setImportPreview(rows);
     setImportMsg("");
     setExpandedImportRow(null);
@@ -700,34 +978,146 @@ function GradeLookup() {
     setDecryptedCache(nextCache);
     setNames(nextNames);
     await saveNames(nextNames);
+    await computeAndSaveRanks(next, nextCache);
     setImportMsg(`Done — ${created} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing code name/PIN, or an encryption error)` : ""}.`);
     setImportPreview(null);
     setImportText("");
     setExpandedImportRow(null);
   }
 
-  // ---- Manage Assessments ----
+  // ---- Manage Grading Structure (shared default + optional per-period overrides) ----
   function openManageAssessments() {
     setAssessDraft(JSON.parse(JSON.stringify(assessments)));
+    setWeightDraft(JSON.parse(JSON.stringify(weightConfig)));
     setAssessMsg("");
     setView("instructorAssessments");
   }
 
-  function addAssessment(type) {
-    setAssessDraft((list) => [...list, { id: newId(type === "quiz" ? "q" : "idx"), type, label: type === "quiz" ? "New Quiz" : "New IndEx", period: 0 }]);
+  // scope is "default" or a period index (0/1/2) referring to that period's override
+  function getScopeCfg(wc, scope) {
+    return scope === "default" ? wc.default : wc.overrides[scope];
+  }
+  function setScopeCfg(wc, scope, updated) {
+    return scope === "default" ? { ...wc, default: updated } : { ...wc, overrides: { ...wc.overrides, [scope]: updated } };
+  }
+
+  function addAssessment(period, categoryId) {
+    const cfg = weightDraft.overrides[period] || weightDraft.default;
+    const cat = cfg.categories.find((c) => c.id === categoryId);
+    setAssessDraft((list) => [...list, { id: newId(categoryId), categoryId, label: `New ${cat ? cat.label : "Item"}`, period }]);
   }
 
   function updateAssessment(id, field, value) {
-    setAssessDraft((list) => list.map((a) => (a.id === id ? { ...a, [field]: field === "period" ? Number(value) : value } : a)));
+    setAssessDraft((list) => list.map((a) => (a.id === id ? { ...a, [field]: value } : a)));
   }
 
   function removeAssessmentDraft(id) {
     setAssessDraft((list) => list.filter((a) => a.id !== id));
   }
 
+  function addCategory(scope) {
+    setWeightDraft((wc) => {
+      const path = getScopeCfg(wc, scope);
+      const updated = { ...path, categories: [...path.categories, { id: newId("cat"), label: "New Category", weight: 0 }] };
+      return setScopeCfg(wc, scope, updated);
+    });
+  }
+
+  function updateCategory(scope, id, field, value) {
+    setWeightDraft((wc) => {
+      const path = getScopeCfg(wc, scope);
+      const updated = { ...path, categories: path.categories.map((c) => (c.id === id ? { ...c, [field]: field === "weight" ? Number(value) : value } : c)) };
+      return setScopeCfg(wc, scope, updated);
+    });
+  }
+
+  function removeCategory(scope, id) {
+    setWeightDraft((wc) => {
+      const path = getScopeCfg(wc, scope);
+      const updated = { ...path, categories: path.categories.filter((c) => c.id !== id) };
+      return setScopeCfg(wc, scope, updated);
+    });
+    // Cascade-remove activities tied to this category, only within the period(s) actually using this scope.
+    setAssessDraft((list) => list.filter((a) => {
+      if (a.categoryId !== id) return true;
+      if (scope === "default") return !!weightDraft.overrides[a.period]; // keep if that period overrides (uses its own categories, unaffected)
+      return a.period !== scope;
+    }));
+  }
+
+  function updateTopWeight(scope, field, value) {
+    setWeightDraft((wc) => setScopeCfg(wc, scope, { ...getScopeCfg(wc, scope), [field]: Number(value) }));
+  }
+
+  function toggleOverride(period) {
+    setWeightDraft((wc) => {
+      const isCustom = !!wc.overrides[period];
+      if (isCustom) {
+        return { ...wc, overrides: { ...wc.overrides, [period]: null } };
+      }
+      return { ...wc, overrides: { ...wc.overrides, [period]: JSON.parse(JSON.stringify(wc.default)) } };
+    });
+  }
+
+  function scopeValidity(cfg) {
+    const catSum = cfg.categories.reduce((s, c) => s + (Number(c.weight) || 0), 0);
+    const topSum = (Number(cfg.examWeight) || 0) + (Number(cfg.classStandingWeight) || 0);
+    return { catSum, topSum, valid: catSum === 100 && topSum === 100 };
+  }
+
+  const weightsValid = weightDraft
+    ? scopeValidity(weightDraft.default).valid && [0, 1, 2].every((p) => !weightDraft.overrides[p] || scopeValidity(weightDraft.overrides[p]).valid)
+    : false;
+
+  // Computes each student's class rank (standard competition ranking - ties share a rank,
+  // the next distinct value skips accordingly) and stores ONLY rank numbers, never scores,
+  // in a separate unencrypted bucket so students can read their own rank without a full decrypt.
+  // Core rank computation, callable with EXPLICIT roster/cache data (not stale state) so it can
+  // run silently right after a save, using the just-computed fresh values instead of waiting for
+  // a re-render. Stores ONLY rank numbers (never scores) - same privacy boundary as before.
+  async function computeAndSaveRanks(rosterList, cacheOverride) {
+    try {
+      const cache = cacheOverride || decryptedCache;
+      const withAvg = rosterList
+        .map((s) => {
+          const d = cache[s.id];
+          const plain = d ? { ...s, exams: d.exams, scores: d.scores } : (s.encData ? { ...s, exams: [null, null, null], scores: {} } : s);
+          return { id: s.id, avgVal: computeTermAverage(plain, assessments, weightConfig) };
+        })
+        .filter((x) => x.avgVal !== null);
+      withAvg.sort((a, b) => b.avgVal - a.avgVal);
+      const rankMap = {};
+      let rank = 0, seen = 0, lastAvg = null;
+      withAvg.forEach((x) => {
+        seen++;
+        if (x.avgVal !== lastAvg) { rank = seen; lastAvg = x.avgVal; }
+        rankMap[x.id] = rank;
+      });
+      const payload = { rankMap, total: withAvg.length, publishedAt: new Date().toISOString() };
+      await window.storage.set(`ranks:${currentClassId}`, JSON.stringify(payload), true);
+      return withAvg.length;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Manual "force refresh" button - same core logic, using current state, with visible feedback.
+  async function publishRanks() {
+    setPublishingRanks(true);
+    setRankMsg("");
+    const count = await computeAndSaveRanks(roster, decryptedCache);
+    setRankMsg(count === null ? "Failed to publish ranks — check your connection and try again." : `Published — ${count} student${count !== 1 ? "s" : ""} ranked.`);
+    setPublishingRanks(false);
+  }
+
   async function saveAssessments() {
+    if (!weightsValid) {
+      setAssessMsg("Every active weight section must sum to exactly 100% before saving.");
+      return;
+    }
     const removedIds = assessments.filter((a) => !assessDraft.some((d) => d.id === a.id)).map((a) => a.id);
     await persistAssessments(assessDraft);
+    await persistWeightConfig(weightDraft);
     if (removedIds.length > 0) {
       const wrapKey = await deriveWrapKey(instructorSecret, INSTRUCTOR_SALT);
       const nextCache = { ...decryptedCache };
@@ -755,6 +1145,9 @@ function GradeLookup() {
       }
       await persistRoster(nextRoster);
       setDecryptedCache(nextCache);
+      await computeAndSaveRanks(nextRoster, nextCache);
+    } else {
+      await computeAndSaveRanks(roster, decryptedCache);
     }
     setAssessMsg("Saved. Scores for any removed items were cleared.");
     setTimeout(() => { setAssessMsg(""); setView("instructorRoster"); }, 1400);
@@ -762,15 +1155,27 @@ function GradeLookup() {
 
   const shellStyle = { background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DEEP} 100%)`, minHeight: "100%" };
 
-  if (roster === null || assessments === null) {
+  if (classes === null) {
     return (
       <div className="flex items-center justify-center h-full min-h-[400px]" style={shellStyle}>
-        <div className="text-white/70 text-sm">Loading…</div>
+        <div className="flex flex-col items-center">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 rounded-full border-2 border-white/10" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: AMBER, borderRightColor: AMBER }} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <svg viewBox="0 0 100 100" className="w-8 h-8 animate-pulse" fill="none" stroke={AMBER} strokeWidth="3.2" strokeLinejoin="round" strokeLinecap="round">
+                <path d="M16,22 Q15,15 24,15 Q29,15 33,19 L77,71 Q85,80 76,85 Q71,85 67,81 Z" />
+                <path d="M84,22 Q85,15 76,15 Q71,15 67,19 L23,71 Q15,80 24,85 Q29,85 33,81 Z" />
+              </svg>
+            </div>
+          </div>
+          <div className="text-white/60 text-xs tracking-wide">Loading…</div>
+        </div>
       </div>
     );
   }
 
-  const { cols: importCols } = buildImportColumns(assessments);
+  const importCols = (assessments && weightConfig) ? buildImportColumns(assessments, weightConfig).cols : [];
 
   return (
     <div style={shellStyle} className="min-h-full w-full flex flex-col items-center px-4 py-8 font-sans">
@@ -778,14 +1183,20 @@ function GradeLookup() {
         {/* Header */}
         <div className="flex flex-col items-center mb-6">
           <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ backgroundColor: "rgba(247,201,72,0.12)" }}>
-            <svg viewBox="0 0 100 100" className="w-9 h-9">
-              <polyline points="15,68 32,35 50,68 68,35 85,68" fill="none" stroke={AMBER} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-              <line x1="15" y1="68" x2="85" y2="68" stroke={AMBER} strokeWidth="7" strokeLinecap="round" />
-              <line x1="32" y1="35" x2="68" y2="35" stroke={AMBER} strokeWidth="7" strokeLinecap="round" />
+            <svg viewBox="0 0 100 100" className="w-9 h-9" fill="none" stroke={AMBER} strokeWidth="3.2" strokeLinejoin="round" strokeLinecap="round">
+              <path d="M16,22 Q15,15 24,15 Q29,15 33,19 L77,71 Q85,80 76,85 Q71,85 67,81 Z" />
+              <path d="M84,22 Q85,15 76,15 Q71,15 67,19 L23,71 Q15,80 24,85 Q29,85 33,81 Z" />
             </svg>
           </div>
-          <h1 className="text-white text-lg font-bold tracking-wide text-center">THEORY OF STRUCTURES</h1>
+          <h1 className="text-white text-lg font-bold tracking-wide text-center">KAIROS</h1>
           <p className="text-white/50 text-xs tracking-wider mt-0.5">GRADE LOOKUP</p>
+          {currentClassId && classes.find((c) => c.id === currentClassId) && (
+            <div className="mt-2 px-3 py-1 rounded-full" style={{ backgroundColor: "rgba(247,201,72,0.15)" }}>
+              <span className="text-xs font-semibold" style={{ color: AMBER }}>
+                {classes.find((c) => c.id === currentClassId).name}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* LANDING */}
@@ -798,7 +1209,7 @@ function GradeLookup() {
               </div>
             )}
             <button
-              onClick={() => { setView("studentLogin"); setError(""); setCodeInput(""); setPinInput(""); }}
+              onClick={() => { setView("studentLogin"); setError(""); setCodeInput(""); setPinInput(""); setSelectedClassForStudent(""); }}
               className="w-full bg-white rounded-2xl p-5 flex items-center gap-4 text-left hover:brightness-95 transition"
             >
               <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: AMBER }}>
@@ -831,7 +1242,17 @@ function GradeLookup() {
               <ChevronLeft size={14} /> Back
             </button>
             <h2 className="font-bold text-lg mb-1" style={{ color: NAVY }}>Enter your details</h2>
-            <p className="text-xs text-gray-500 mb-4">Use the code name and PIN given to you in class.</p>
+            <p className="text-xs text-gray-500 mb-4">Use the class, code name, and PIN given to you.</p>
+            <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>Class</label>
+            <select
+              value={selectedClassForStudent}
+              onChange={(e) => setSelectedClassForStudent(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2.5 mb-3 text-sm outline-none bg-white"
+              style={{ borderColor: "#ddd" }}
+            >
+              <option value="">Select your class…</option>
+              {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
             <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>Code Name</label>
             <input
               value={codeInput}
@@ -853,16 +1274,17 @@ function GradeLookup() {
               style={{ borderColor: "#ddd" }}
             />
             {error && <div className="text-xs text-red-600 mb-3">{error}</div>}
-            <button onClick={handleStudentLogin} className="w-full rounded-lg py-3 font-bold text-sm" style={{ backgroundColor: NAVY, color: "white" }}>
-              View My Grade
+            <button onClick={handleStudentLogin} disabled={actionLoading} className="w-full rounded-lg py-3 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60" style={{ backgroundColor: NAVY, color: "white" }}>
+              {actionLoading && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              {actionLoading ? "Checking…" : "View My Grade"}
             </button>
           </div>
         )}
 
         {/* STUDENT DASHBOARD */}
         {view === "studentDashboard" && foundStudent && (() => {
-          const term = computeTermAverage(foundStudent, assessments);
-          const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(foundStudent, p, assessments));
+          const term = computeTermAverage(foundStudent, assessments, weightConfig);
+          const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(foundStudent, p, assessments, weightConfig));
           return (
             <div className="space-y-4">
               <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
@@ -870,7 +1292,14 @@ function GradeLookup() {
               </button>
               <div className="bg-white rounded-2xl p-6 text-center">
                 <div className="text-xs font-semibold tracking-wide text-gray-400 mb-1">{foundStudent.codeName}</div>
-                <div className="text-5xl font-extrabold" style={{ color: NAVY }}>
+                {foundStudent.rank && (
+                  <div className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 mb-2" style={{ backgroundColor: `${AMBER}22` }}>
+                    <span className="text-xs font-bold" style={{ color: AMBER_DEEP }}>
+                      {ordinal(foundStudent.rank)} out of {foundStudent.total} in class
+                    </span>
+                  </div>
+                )}
+                <div className="text-5xl font-extrabold" style={{ color: gradeColor(term) }}>
                   {term === null ? "—" : term.toFixed(1)}
                   {term !== null && <span className="text-xl font-bold text-gray-400">%</span>}
                 </div>
@@ -880,7 +1309,7 @@ function GradeLookup() {
                   {PERIODS.map((label, p) => (
                     <div key={label} className="rounded-xl py-2.5" style={{ backgroundColor: `${PERIOD_COLORS[p]}14` }}>
                       <div className="text-[10px] font-bold tracking-wide" style={{ color: PERIOD_COLORS[p] }}>{label.toUpperCase()} · {PERIOD_WEIGHTS[p] * 100}%</div>
-                      <div className="text-lg font-extrabold" style={{ color: NAVY }}>
+                      <div className="text-lg font-extrabold" style={{ color: gradeColor(periodGrades[p].total) }}>
                         {periodGrades[p].total === null ? "—" : periodGrades[p].total.toFixed(1)}
                       </div>
                     </div>
@@ -894,33 +1323,28 @@ function GradeLookup() {
                   <div key={label} className="bg-white rounded-2xl p-5">
                     <div className="flex items-center justify-between mb-3">
                       <div className="text-sm font-bold" style={{ color: PERIOD_COLORS[p] }}>{label} Period</div>
-                      <div className="text-sm font-extrabold" style={{ color: NAVY }}>{pg.total === null ? "—" : `${pg.total.toFixed(1)}%`}</div>
+                      <div className="text-sm font-extrabold" style={{ color: gradeColor(pg.total) }}>{pg.total === null ? "—" : `${pg.total.toFixed(1)}%`}</div>
                     </div>
-                    <ScoreBar label="Exam (40%)" value={pg.examScore} color={NAVY} />
-                    <ScoreBar label="Class Standing (60%)" value={pg.classStanding} color={AMBER_DEEP} />
+                    <ScoreBar label={`Exam (${pg.cfg.examWeight}%)`} value={pg.examScore} color={gradeColor(pg.examScore)} />
+                    <ScoreBar label={`Class Standing (${pg.cfg.classStandingWeight}%)`} value={pg.classStanding} color={gradeColor(pg.classStanding)} />
                     <div className="pl-4 -mt-1 mb-3 border-l-2" style={{ borderColor: "#f0f0f0" }}>
-                      <ScoreBar label="↳ Quizzes (75% of Class Standing)" value={pg.quizAvg} color={AMBER_DEEP} />
-                      <ScoreBar label="↳ IndEx (25% of Class Standing)" value={pg.idxAvg} color={STEEL} />
+                      {pg.categoryData.map((c, ci) => (
+                        <ScoreBar key={c.id} label={`↳ ${c.label} (${c.weight}% of Class Standing)`} value={c.average} color={gradeColor(c.average)} />
+                      ))}
                     </div>
                     <div className="mt-3 pt-3 border-t" style={{ borderColor: "#f0f0f0" }}>
-                      {pg.quizItems.map((a) => (
+                      {pg.categoryData.flatMap((c) => c.items).map((a) => (
                         <div key={a.id} className="flex justify-between text-xs py-1">
                           <span className="text-gray-500">{a.label}</span>
-                          <span className="font-semibold" style={{ color: NAVY }}>{foundStudent.scores[a.id] === undefined ? "—" : `${foundStudent.scores[a.id]}%`}</span>
-                        </div>
-                      ))}
-                      {pg.idxItems.map((a) => (
-                        <div key={a.id} className="flex justify-between text-xs py-1">
-                          <span className="text-gray-500">{a.label}</span>
-                          <span className="font-semibold" style={{ color: NAVY }}>{foundStudent.scores[a.id] === undefined ? "—" : `${foundStudent.scores[a.id]}%`}</span>
+                          <span className="font-semibold" style={{ color: gradeColor(foundStudent.scores[a.id]) }}>{foundStudent.scores[a.id] === undefined ? "—" : `${foundStudent.scores[a.id]}%`}</span>
                         </div>
                       ))}
                       <div className="flex justify-between text-xs py-1">
                         <span className="text-gray-500">{EXAM_LABELS[p]} Exam</span>
-                        <span className="font-semibold" style={{ color: NAVY }}>{foundStudent.exams[p] === null || foundStudent.exams[p] === undefined ? "—" : `${foundStudent.exams[p]}%`}</span>
+                        <span className="font-semibold" style={{ color: gradeColor(foundStudent.exams[p]) }}>{foundStudent.exams[p] === null || foundStudent.exams[p] === undefined ? "—" : `${foundStudent.exams[p]}%`}</span>
                       </div>
-                      {pg.quizItems.length === 0 && pg.idxItems.length === 0 && (
-                        <div className="text-xs text-gray-300 italic py-1">No quizzes or IndEx currently assigned to this period.</div>
+                      {pg.categoryData.every((c) => c.items.length === 0) && (
+                        <div className="text-xs text-gray-300 italic py-1">No activities currently assigned to this period.</div>
                       )}
                     </div>
                   </div>
@@ -940,7 +1364,7 @@ function GradeLookup() {
               <KeyRound size={18} color={NAVY} />
               <h2 className="font-bold text-lg" style={{ color: NAVY }}>Instructor Access</h2>
             </div>
-            <p className="text-xs text-gray-500 mb-4">Enter the instructor passcode to manage the roster.</p>
+            <p className="text-xs text-gray-500 mb-4">Enter the instructor passcode to manage your classes.</p>
             <input
               value={passInput}
               onChange={(e) => setPassInput(e.target.value)}
@@ -961,12 +1385,62 @@ function GradeLookup() {
           </div>
         )}
 
+        {/* INSTRUCTOR SELECT CLASS */}
+        {view === "instructorSelectClass" && (
+          <div className="space-y-3">
+            <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+              <ChevronLeft size={14} /> Log out
+            </button>
+            <div className="bg-white rounded-2xl p-5">
+              <div className="text-sm font-bold mb-3" style={{ color: NAVY }}>Your Classes</div>
+              <div className="space-y-2 mb-4">
+                {classes.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => selectClassAsInstructor(c.id)}
+                    disabled={actionLoading}
+                    className="w-full flex items-center justify-between bg-gray-50 hover:bg-amber-50 transition rounded-lg p-3 text-left disabled:opacity-50"
+                  >
+                    <span className="text-sm font-semibold" style={{ color: NAVY }}>{c.name}</span>
+                    {actionLoading ? (
+                      <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin" />
+                    ) : (
+                      <ArrowRight size={16} className="text-gray-300" />
+                    )}
+                  </button>
+                ))}
+                {classes.length === 0 && (
+                  <div className="text-xs text-gray-300 italic">No classes yet — add your first one below.</div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={newClassName}
+                  onChange={(e) => setNewClassName(e.target.value)}
+                  placeholder="e.g. Theory of Structures, Section A"
+                  onKeyDown={(e) => e.key === "Enter" && createClass()}
+                  className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ borderColor: "#ddd" }}
+                />
+                <button
+                  onClick={createClass}
+                  disabled={!newClassName.trim() || creatingClass}
+                  className="rounded-lg px-3 py-2 font-bold text-sm flex items-center gap-1 disabled:opacity-40"
+                  style={{ backgroundColor: AMBER, color: NAVY }}
+                >
+                  <Plus size={15} /> Add
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* INSTRUCTOR ROSTER */}
         {view === "instructorRoster" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
-                <ChevronLeft size={14} /> Back
+              <button onClick={() => setView("instructorSelectClass")} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+                <ChevronLeft size={14} /> Switch Class
               </button>
               <span className="text-xs text-white/50">{roster.length} student{roster.length !== 1 ? "s" : ""}</span>
             </div>
@@ -977,7 +1451,7 @@ function GradeLookup() {
               onClick={openManageAssessments}
               className="w-full rounded-xl py-3 flex items-center justify-center gap-2 font-bold text-sm border border-white/15 text-white hover:bg-white/5 transition"
             >
-              <Settings2 size={16} /> Manage Quizzes & IndEx
+              <Settings2 size={16} /> Manage Grading Structure
             </button>
             <button
               onClick={() => { setView("instructorDashboard"); setDashSearch(""); }}
@@ -998,7 +1472,7 @@ function GradeLookup() {
                 </div>
               )}
               {roster.map((s) => {
-                const term = computeTermAverage(plainOf(s), assessments);
+                const term = computeTermAverage(plainOf(s), assessments, weightConfig);
                 return (
                   <div key={s.id} className="bg-white rounded-xl p-4 flex items-center justify-between">
                     <button onClick={() => openEdit(s)} className="flex-1 text-left">
@@ -1016,69 +1490,100 @@ function GradeLookup() {
           </div>
         )}
 
-        {/* INSTRUCTOR MANAGE ASSESSMENTS */}
-        {view === "instructorAssessments" && assessDraft && (
+        {/* INSTRUCTOR MANAGE GRADING STRUCTURE */}
+        {view === "instructorAssessments" && assessDraft && weightDraft && (() => {
+          return (
           <div className="space-y-3">
             <button onClick={() => setView("instructorRoster")} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
               <ChevronLeft size={14} /> Back to roster
             </button>
-            <div className="bg-white rounded-2xl p-5">
-              <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>Manage Quizzes & IndEx</div>
-              <p className="text-xs text-gray-500 mb-4">Rename, move to a different period, remove, or add. The 40/45/15 formula always applies per period, no matter how many items it has.</p>
 
-              {["quiz", "index"].map((type) => (
-                <div key={type} className="mb-5">
-                  <div className="text-xs font-bold tracking-wide mb-2" style={{ color: type === "quiz" ? AMBER_DEEP : STEEL }}>
-                    {type === "quiz" ? "QUIZZES" : "INDEX (INDEX)"}
+            <WeightEditor scope="default" cfg={weightDraft.default} title="Shared Default — Grading Split" subtitle="Applies to any period that isn't set to custom below. Must sum to exactly 100%." scopeValidity={scopeValidity} updateTopWeight={updateTopWeight} updateCategory={updateCategory} removeCategory={removeCategory} addCategory={addCategory} />
+
+            {PERIODS.map((label, p) => {
+              const isCustom = !!weightDraft.overrides[p];
+              return (
+                <div key={p} className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-sm font-bold text-white">{label}</div>
+                    <button
+                      onClick={() => toggleOverride(p)}
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                      style={{ backgroundColor: isCustom ? AMBER : "rgba(255,255,255,0.12)", color: isCustom ? NAVY : "white" }}
+                    >
+                      {isCustom ? "Custom for this period" : "Using shared default"}
+                    </button>
                   </div>
-                  <div className="space-y-2">
-                    {assessDraft.filter((a) => a.type === type).map((a) => (
-                      <div key={a.id} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
-                        <input
-                          value={a.label}
-                          onChange={(e) => updateAssessment(a.id, "label", e.target.value)}
-                          className="flex-1 border rounded-md px-2 py-1.5 text-sm outline-none"
-                          style={{ borderColor: "#ddd" }}
-                        />
-                        <select
-                          value={a.period}
-                          onChange={(e) => updateAssessment(a.id, "period", e.target.value)}
-                          className="border rounded-md px-1.5 py-1.5 text-xs outline-none"
-                          style={{ borderColor: "#ddd" }}
+                  {!isCustom ? (
+                    <p className="text-[11px] text-white/40">Tap the badge above to give {label} its own independent split and categories.</p>
+                  ) : (
+                    <div className="mt-2 space-y-3">
+                      <WeightEditor scope={p} cfg={weightDraft.overrides[p]} title={`${label} — Grading Split`} scopeValidity={scopeValidity} updateTopWeight={updateTopWeight} updateCategory={updateCategory} removeCategory={removeCategory} addCategory={addCategory} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="bg-white rounded-2xl p-5">
+              <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>Activities</div>
+              <p className="text-xs text-gray-500 mb-4">Rename, remove, or add — grouped by period, then by category within that period.</p>
+
+              {PERIODS.map((label, p) => {
+                const cfg = weightDraft.overrides[p] || weightDraft.default;
+                return (
+                  <div key={p} className="mb-6">
+                    <div className="text-xs font-bold tracking-wide mb-2" style={{ color: PERIOD_COLORS[p] }}>{label.toUpperCase()}</div>
+                    {cfg.categories.map((cat, ci) => (
+                      <div key={cat.id} className="mb-3 pl-3 border-l-2" style={{ borderColor: "#f0f0f0" }}>
+                        <div className="text-[11px] font-bold mb-1.5" style={{ color: categoryColor(ci) }}>{cat.label}</div>
+                        <div className="space-y-2">
+                          {assessDraft.filter((a) => a.categoryId === cat.id && a.period === p).map((a) => (
+                            <div key={a.id} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+                              <input
+                                value={a.label}
+                                onChange={(e) => updateAssessment(a.id, "label", e.target.value)}
+                                className="flex-1 border rounded-md px-2 py-1.5 text-sm outline-none"
+                                style={{ borderColor: "#ddd" }}
+                              />
+                              <button onClick={() => removeAssessmentDraft(a.id)} className="p-1.5 text-gray-300 hover:text-red-500 transition">
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          ))}
+                          {assessDraft.filter((a) => a.categoryId === cat.id && a.period === p).length === 0 && (
+                            <div className="text-xs text-gray-300 italic">None currently.</div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => addAssessment(p, cat.id)}
+                          className="mt-2 text-xs font-semibold flex items-center gap-1"
+                          style={{ color: categoryColor(ci) }}
                         >
-                          {PERIODS.map((p, i) => <option key={p} value={i}>{p}</option>)}
-                        </select>
-                        <button onClick={() => removeAssessmentDraft(a.id)} className="p-1.5 text-gray-300 hover:text-red-500 transition">
-                          <Trash2 size={15} />
+                          <Plus size={13} /> Add {cat.label}
                         </button>
                       </div>
                     ))}
-                    {assessDraft.filter((a) => a.type === type).length === 0 && (
-                      <div className="text-xs text-gray-300 italic">None currently.</div>
+                    {cfg.categories.length === 0 && (
+                      <div className="text-xs text-gray-300 italic">Add a category above first.</div>
                     )}
                   </div>
-                  <button
-                    onClick={() => addAssessment(type)}
-                    className="mt-2 text-xs font-semibold flex items-center gap-1"
-                    style={{ color: type === "quiz" ? AMBER_DEEP : STEEL }}
-                  >
-                    <Plus size={13} /> Add {type === "quiz" ? "Quiz" : "IndEx"}
-                  </button>
-                </div>
-              ))}
+                );
+              })}
 
               {assessMsg && (
                 <div className="flex items-center gap-1.5 text-xs bg-amber-50 rounded-lg px-3 py-2 mb-3" style={{ color: NAVY }}>
                   <CheckCircle2 size={14} /> {assessMsg}
                 </div>
               )}
-              <button onClick={saveAssessments} className="w-full rounded-lg py-3 font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: NAVY }}>
+              <button onClick={saveAssessments} disabled={!weightsValid} className="w-full rounded-lg py-3 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: AMBER, color: NAVY }}>
                 <Save size={16} /> Save Changes
               </button>
-              <p className="text-[11px] text-gray-400 mt-2">Removing an item clears any scores students had for it — this can't be undone.</p>
+              <p className="text-[11px] text-gray-400 mt-2">Removing an item or a whole category clears any scores students had for it — this can't be undone. Turning off a period's custom setup discards that period's own categories/activities too.</p>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* INSTRUCTOR IMPORT */}
         {view === "instructorImport" && (
@@ -1089,7 +1594,7 @@ function GradeLookup() {
             <div className="bg-white rounded-2xl p-5">
               <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>Import from Google Sheets</div>
               <p className="text-xs text-gray-500 mb-3">
-                Arrange your sheet's columns in this exact order (this updates automatically if you rename/move/add items under Manage Quizzes & IndEx), select the rows, and copy (Ctrl/Cmd+C). Paste below.
+                Arrange your sheet's columns in this exact order (this updates automatically if you rename/move/add items under Manage Grading Structure), select the rows, and copy (Ctrl/Cmd+C). Paste below.
               </p>
               <div className="bg-gray-50 rounded-lg p-3 mb-3 overflow-x-auto">
                 <div className="text-[10px] text-gray-500 whitespace-nowrap font-mono">
@@ -1228,12 +1733,28 @@ function GradeLookup() {
                 />
               </div>
 
+              <button
+                onClick={publishRanks}
+                disabled={publishingRanks}
+                className="w-full rounded-xl py-2.5 flex items-center justify-center gap-2 font-bold text-xs disabled:opacity-60"
+                style={{ backgroundColor: AMBER, color: NAVY }}
+              >
+                {publishingRanks && <span className="w-3 h-3 rounded-full animate-spin" style={{ border: `2px solid ${NAVY}44`, borderTopColor: NAVY }} />}
+                {publishingRanks ? "Refreshing…" : "Refresh Ranks Now"}
+              </button>
+              <p className="text-[10px] text-white/40 text-center -mt-1">Ranks already update automatically whenever you save a grade — this is just a manual force-refresh.</p>
+              {rankMsg && (
+                <div className="flex items-center gap-1.5 text-xs text-white bg-white/10 rounded-lg px-3 py-2">
+                  <CheckCircle2 size={13} /> {rankMsg}
+                </div>
+              )}
+
               {isMobile ? (
                 <div className="space-y-2">
                   {filtered.map((s) => {
                     const p_ = plainOf(s);
-                    const term = computeTermAverage(p_, assessments);
-                    const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(p_, p, assessments));
+                    const term = computeTermAverage(p_, assessments, weightConfig);
+                    const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(p_, p, assessments, weightConfig));
                     const isOpen = expandedId === s.id;
                     return (
                       <div key={s.id} className="bg-white rounded-xl overflow-hidden">
@@ -1248,7 +1769,7 @@ function GradeLookup() {
                           <div className="flex items-center gap-2">
                             <div className="text-right">
                               <div className="text-[10px] text-gray-400">Term Avg</div>
-                              <div className="font-bold text-sm" style={{ color: NAVY }}>{term === null ? "—" : `${term.toFixed(1)}%`}</div>
+                              <div className="font-bold text-sm" style={{ color: gradeColor(term) }}>{term === null ? "—" : `${term.toFixed(1)}%`}</div>
                             </div>
                             {isOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
                           </div>
@@ -1261,17 +1782,17 @@ function GradeLookup() {
                                 <div className="grid grid-cols-3 gap-2">
                                   <div className="bg-gray-50 rounded-lg py-1.5 text-center">
                                     <div className="text-[9px] text-gray-400">C.Stand</div>
-                                    <div className="text-xs font-bold" style={{ color: STEEL }}>
+                                    <div className="text-xs font-bold" style={{ color: gradeColor(periodGrades[p].classStanding) }}>
                                       {periodGrades[p].classStanding === null ? "—" : periodGrades[p].classStanding.toFixed(1)}
                                     </div>
                                   </div>
                                   <div className="bg-gray-50 rounded-lg py-1.5 text-center">
                                     <div className="text-[9px] text-gray-400">Exam</div>
-                                    <div className="text-xs font-bold" style={{ color: AMBER_DEEP }}>{cell(p_.exams[p])}</div>
+                                    <div className="text-xs font-bold" style={{ color: gradeColor(p_.exams[p]) }}>{cell(p_.exams[p])}</div>
                                   </div>
                                   <div className="rounded-lg py-1.5 text-center" style={{ backgroundColor: `${PERIOD_COLORS[p]}14` }}>
                                     <div className="text-[9px] text-gray-400">Grade</div>
-                                    <div className="text-xs font-bold" style={{ color: PERIOD_COLORS[p] }}>
+                                    <div className="text-xs font-bold" style={{ color: gradeColor(periodGrades[p].total) }}>
                                       {periodGrades[p].total === null ? "—" : periodGrades[p].total.toFixed(1)}
                                     </div>
                                   </div>
@@ -1303,27 +1824,29 @@ function GradeLookup() {
                         <th className="text-left px-3 py-2.5 text-white font-bold sticky left-0" style={{ backgroundColor: NAVY }}>Real Name</th>
                         <th className="text-left px-3 py-2.5 text-white font-bold">Code Name</th>
                         <th className="text-left px-3 py-2.5 text-white font-bold">PIN</th>
-                        {[0, 1, 2].map((p) => (
+                        {[0, 1, 2].map((p) => {
+                          const cfg = effectiveConfigForPeriod(weightConfig, p);
+                          return (
                           <Fragment key={p}>
-                            {assessmentsInPeriod(assessments, "quiz", p).map((a) => (
-                              <th key={a.id} className="text-right px-2 py-2.5 text-white font-bold" title={a.label}>{a.label.split("—")[0].trim()}</th>
+                            {cfg.categories.map((cat) => (
+                              assessmentsInPeriod(assessments, cat.id, p).map((a) => (
+                                <th key={a.id} className="text-right px-2 py-2.5 text-white font-bold" title={a.label}>{a.label.split("—")[0].trim()}</th>
+                              ))
                             ))}
-                            {assessmentsInPeriod(assessments, "index", p).map((a) => (
-                              <th key={a.id} className="text-right px-2 py-2.5 text-white font-bold" title={a.label}>{a.label.split("—")[0].trim()}</th>
-                            ))}
-                            <th className="text-right px-2 py-2.5 font-bold" style={{ color: STEEL }} title="75% Quiz avg + 25% IndEx avg">C.Stand</th>
+                            <th className="text-right px-2 py-2.5 font-bold" style={{ color: STEEL }} title={cfg.categories.map((c) => `${c.label} ${c.weight}%`).join(" + ")}>C.Stand</th>
                             <th className="text-right px-2 py-2.5 font-bold" style={{ color: AMBER_DEEP }}>{EXAM_LABELS[p]}</th>
-                            <th className="text-right px-2 py-2.5 font-bold" style={{ backgroundColor: PERIOD_COLORS[p], color: "white" }} title="40% Exam + 60% Class Standing">{PERIODS[p]} Grade</th>
+                            <th className="text-right px-2 py-2.5 font-bold" style={{ backgroundColor: PERIOD_COLORS[p], color: "white" }} title={`${cfg.examWeight}% Exam + ${cfg.classStandingWeight}% Class Standing`}>{PERIODS[p]} Grade</th>
                           </Fragment>
-                        ))}
+                          );
+                        })}
                         <th className="text-right px-3 py-2.5 text-white font-bold" style={{ backgroundColor: AMBER_DEEP, color: NAVY }}>Term Avg</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filtered.map((s, ri) => {
                         const p_ = plainOf(s);
-                        const term = computeTermAverage(p_, assessments);
-                        const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(p_, p, assessments));
+                        const term = computeTermAverage(p_, assessments, weightConfig);
+                        const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(p_, p, assessments, weightConfig));
                         const rowBg = ri % 2 === 0 ? "white" : "#F7F8FA";
                         return (
                           <tr key={s.id} onClick={() => openEdit(s)} className="cursor-pointer hover:bg-amber-50 transition" style={{ backgroundColor: rowBg }}>
@@ -1332,22 +1855,21 @@ function GradeLookup() {
                             <td className="px-3 py-2 text-gray-400">{(s.pinHash || s.encStudentKey) ? "●●●●●●" : <span className="text-gray-300">not set</span>}</td>
                             {[0, 1, 2].map((p) => (
                               <Fragment key={p}>
-                                {assessmentsInPeriod(assessments, "quiz", p).map((a) => (
-                                  <td key={a.id} className="px-2 py-2 text-right">{cell(p_.scores[a.id])}</td>
+                                {periodGrades[p].cfg.categories.map((cat) => (
+                                  assessmentsInPeriod(assessments, cat.id, p).map((a) => (
+                                    <td key={a.id} className="px-2 py-2 text-right" style={{ color: p_.scores[a.id] === undefined ? undefined : gradeColor(p_.scores[a.id]) }}>{cell(p_.scores[a.id])}</td>
+                                  ))
                                 ))}
-                                {assessmentsInPeriod(assessments, "index", p).map((a) => (
-                                  <td key={a.id} className="px-2 py-2 text-right">{cell(p_.scores[a.id])}</td>
-                                ))}
-                                <td className="px-2 py-2 text-right font-semibold" style={{ color: STEEL }}>
+                                <td className="px-2 py-2 text-right font-semibold" style={{ color: gradeColor(periodGrades[p].classStanding) }}>
                                   {periodGrades[p].classStanding === null ? <span className="text-gray-300 font-normal">—</span> : periodGrades[p].classStanding.toFixed(1)}
                                 </td>
-                                <td className="px-2 py-2 text-right">{cell(p_.exams[p])}</td>
-                                <td className="px-2 py-2 text-right font-bold" style={{ color: PERIOD_COLORS[p] }}>
+                                <td className="px-2 py-2 text-right" style={{ color: gradeColor(p_.exams[p]) }}>{cell(p_.exams[p])}</td>
+                                <td className="px-2 py-2 text-right font-bold" style={{ color: gradeColor(periodGrades[p].total) }}>
                                   {periodGrades[p].total === null ? <span className="text-gray-300 font-normal">—</span> : periodGrades[p].total.toFixed(1)}
                                 </td>
                               </Fragment>
                             ))}
-                            <td className="px-3 py-2 text-right font-bold" style={{ color: NAVY, backgroundColor: "#FDF3DC" }}>
+                            <td className="px-3 py-2 text-right font-bold" style={{ color: gradeColor(term), backgroundColor: "#FDF3DC" }}>
                               {term === null ? "—" : `${term.toFixed(1)}%`}
                             </td>
                           </tr>
@@ -1400,32 +1922,24 @@ function GradeLookup() {
               />
             </div>
 
-            {[0, 1, 2].map((p) => (
+            {[0, 1, 2].map((p) => {
+              const cfg = effectiveConfigForPeriod(weightConfig, p);
+              return (
               <div key={p} className="bg-white rounded-2xl p-5">
                 <div className="text-xs font-bold tracking-wide mb-3" style={{ color: PERIOD_COLORS[p] }}>{PERIODS[p].toUpperCase()} PERIOD (%)</div>
-                {assessmentsInPeriod(assessments, "quiz", p).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-600">{a.label}</span>
-                    <input
-                      type="number" min="0" max="100"
-                      value={draft.scores[a.id] ?? ""}
-                      onChange={(e) => updateDraftScore(a.id, e.target.value)}
-                      className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right outline-none"
-                      style={{ borderColor: "#ddd" }}
-                    />
-                  </div>
-                ))}
-                {assessmentsInPeriod(assessments, "index", p).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-600">{a.label}</span>
-                    <input
-                      type="number" min="0" max="100"
-                      value={draft.scores[a.id] ?? ""}
-                      onChange={(e) => updateDraftScore(a.id, e.target.value)}
-                      className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right outline-none"
-                      style={{ borderColor: "#ddd" }}
-                    />
-                  </div>
+                {cfg.categories.map((cat) => (
+                  assessmentsInPeriod(assessments, cat.id, p).map((a) => (
+                    <div key={a.id} className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-gray-600">{a.label}</span>
+                      <input
+                        type="number" min="0" max="100"
+                        value={draft.scores[a.id] ?? ""}
+                        onChange={(e) => updateDraftScore(a.id, e.target.value)}
+                        className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right outline-none"
+                        style={{ borderColor: "#ddd" }}
+                      />
+                    </div>
+                  ))
                 ))}
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm text-gray-600">{EXAM_LABELS[p]} Exam</span>
@@ -1437,11 +1951,12 @@ function GradeLookup() {
                     style={{ borderColor: "#ddd" }}
                   />
                 </div>
-                {assessmentsInPeriod(assessments, "quiz", p).length === 0 && assessmentsInPeriod(assessments, "index", p).length === 0 && (
-                  <div className="text-xs text-gray-300 italic">No quizzes or IndEx currently assigned to this period.</div>
+                {cfg.categories.every((cat) => assessmentsInPeriod(assessments, cat.id, p).length === 0) && (
+                  <div className="text-xs text-gray-300 italic">No activities currently assigned to this period.</div>
                 )}
               </div>
-            ))}
+              );
+            })}
 
             {saveMsg && (
               <div className="flex items-center gap-1.5 text-xs text-white bg-white/10 rounded-lg px-3 py-2">
@@ -1454,7 +1969,7 @@ function GradeLookup() {
           </div>
         )}
 
-        <div className="text-center text-white/25 text-[10px] mt-8">Theory of Structures · First Semester 2026-2027</div>
+        <div className="text-center text-white/25 text-[10px] mt-8">Kairos Grade Lookup Tool</div>
       </div>
     </div>
   );
