@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Theory of Structures - Grade Lookup</title>
+<link rel="icon" href="data:,">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style> body { margin: 0; background: #4A0712; } </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+/* =====================================================================
+   CONFIG - paste your deployed Google Apps Script Web App URL below
+   ===================================================================== */
+const APPS_SCRIPT_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+/* =====================================================================
+   window.storage polyfill - talks to the Google Sheet via Apps Script
+   instead of Claude's built-in storage. Same interface, so none of the
+   app logic below needed to change.
+   ===================================================================== */
+window.storage = {
+  async get(key, shared) {
+    const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.value === null || data.value === undefined || data.value === "") {
+      throw new Error("Key not found");
+    }
+    return { key, value: data.value, shared: !!shared };
+  },
+  async set(key, value, shared) {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ key, value }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return { key, value, shared: !!shared };
+  },
+  async delete(key, shared) {
+    return this.set(key, "", shared);
+  },
+  async list(prefix, shared) {
+    return { keys: [] };
+  },
+};
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, Fragment } = React;
+
+/* ---- Lightweight inline icon components (replacing lucide-react, which needs a bundler) ---- */
+function makeIcon(pathData, viewBox) {
+  return function Icon({ size = 16, color = "currentColor", className = "" }) {
+    return (
+      <svg width={size} height={size} viewBox={viewBox || "0 0 24 24"} fill="none" stroke={color}
+           strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        {pathData}
+      </svg>
+    );
+  };
+}
+
+const Lock = makeIcon(<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>);
+const User = makeIcon(<><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></>);
+const ChevronLeft = makeIcon(<polyline points="15 18 9 12 15 6"/>);
+const ChevronDown = makeIcon(<polyline points="6 9 12 15 18 9"/>);
+const ChevronUp = makeIcon(<polyline points="18 15 12 9 6 15"/>);
+const Plus = makeIcon(<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>);
+const Trash2 = makeIcon(<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></>);
+const Save = makeIcon(<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>);
+const CheckCircle2 = makeIcon(<><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></>);
+const ShieldAlert = makeIcon(<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>);
+const KeyRound = makeIcon(<><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1h1a1 1 0 0 0 1-1v-1h1a1 1 0 0 0 .707-.293l.828-.828A6 6 0 1 0 8.464 13.05Z"/><circle cx="16.5" cy="7.5" r=".5"/></>);
+const ClipboardPaste = makeIcon(<><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M8 18h1"/><path d="M12 18h5"/><path d="M8 14h1"/><path d="M12 14h5"/></>);
+const ArrowRight = makeIcon(<><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></>);
+const LayoutDashboard = makeIcon(<><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></>);
+const Search = makeIcon(<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>);
+const Settings2 = makeIcon(<><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></>);
+const GripVertical = makeIcon(<><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></>);
+
+
+const NAVY = "#7A0C1F"; // MLQU maroon
+const NAVY_DEEP = "#4A0712"; // deeper maroon for gradients
+const AMBER = "#F7C948";
+const AMBER_DEEP = "#F4A623";
+const STEEL = "#5C7DAA";
+// Instructor passcode is stored as a SHA-256 hash, never in plain text.
+// Current passcode: snorlaxatepikachu1996 — SAVE THIS SOMEWHERE DURABLE. Claude cannot recover it
+// from the hash if forgotten in a future conversation; ask Claude to set a new one instead.
+const INSTRUCTOR_PASSCODE_HASH = "83601a69143cec3b0770d4c21ea908f1a48bbc0802ef9ac8cd44ee2af8232cc5";
+
+async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---- Envelope encryption for grade data ----
+// Each student's exams/scores are encrypted with a random per-student key (DEK).
+// That DEK is then wrapped twice: once with a key derived from the STUDENT's own PIN,
+// once with a key derived from the INSTRUCTOR passcode. Either secret can unlock the same data;
+// nobody without one of the two can read anything, even if the encrypted blob itself is visible.
+const INSTRUCTOR_SALT = "tos-grade-lookup-instructor-salt-v1";
+
+function toB64(bytes) {
+  let bin = "";
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin);
+}
+function fromB64(str) {
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function deriveWrapKey(secret, saltStr) {
+  const enc = new TextEncoder();
+  const km = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode(saltStr), iterations: 100000, hash: "SHA-256" },
+    km, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+  );
+}
+
+async function genDEK() {
+  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+}
+
+async function encryptJSON(dek, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const pt = new TextEncoder().encode(JSON.stringify(obj));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, dek, pt);
+  return { iv: toB64(iv), data: toB64(new Uint8Array(ct)) };
+}
+
+async function decryptJSON(dek, blob) {
+  const iv = fromB64(blob.iv);
+  const ct = fromB64(blob.data);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, dek, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+async function wrapDEK(wrapKey, dek) {
+  const raw = await crypto.subtle.exportKey("raw", dek);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, raw);
+  return { iv: toB64(iv), data: toB64(new Uint8Array(ct)) };
+}
+
+async function unwrapDEK(wrapKey, wrapped) {
+  const iv = fromB64(wrapped.iv);
+  const ct = fromB64(wrapped.data);
+  const raw = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, wrapKey, ct);
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+// Encrypt a student's {exams, scores} into the new envelope format, given their plaintext PIN
+// and the instructor's live passcode (both only ever available transiently, never stored).
+async function encryptStudentData(studentId, plainData, studentPin, instructorPasscode) {
+  const dek = await genDEK();
+  const encData = await encryptJSON(dek, plainData);
+  const studentWrapKey = await deriveWrapKey(studentPin, "student-salt-" + studentId);
+  const instructorWrapKey = await deriveWrapKey(instructorPasscode, INSTRUCTOR_SALT);
+  const encStudentKey = await wrapDEK(studentWrapKey, dek);
+  const encInstructorKey = await wrapDEK(instructorWrapKey, dek);
+  return { encData, encStudentKey, encInstructorKey };
+}
+
+async function decryptWithPin(student, studentId, pin) {
+  const wrapKey = await deriveWrapKey(pin, "student-salt-" + studentId);
+  const dek = await unwrapDEK(wrapKey, student.encStudentKey);
+  return decryptJSON(dek, student.encData);
+}
+
+async function decryptWithInstructorPasscode(student, instructorPasscode) {
+  const wrapKey = await deriveWrapKey(instructorPasscode, INSTRUCTOR_SALT);
+  const dek = await unwrapDEK(wrapKey, student.encInstructorKey);
+  return decryptJSON(dek, student.encData);
+}
+
+const EXAM_LABELS = ["Prelim", "Midterm", "Final"];
+const PERIODS = ["Prelim", "Midterm", "Final"];
+const PERIOD_COLORS = [STEEL, AMBER_DEEP, NAVY];
+const PERIOD_WEIGHTS = [0.3, 0.3, 0.4]; // Prelim 30% / Midterm 30% / Final 40%
+
+// Default assessments - seeded once into shared storage on first run.
+// After that, this list is DATA, editable from Instructor > Manage Assessments.
+const DEFAULT_ASSESSMENTS = [
+  { id: "q1", type: "quiz", label: "Quiz 1 — Unit 1", period: 0 },
+  { id: "q2", type: "quiz", label: "Quiz 2 — Unit 2", period: 0 },
+  { id: "q3", type: "quiz", label: "Quiz 3 — Units 3-5", period: 1 },
+  { id: "q4", type: "quiz", label: "Quiz 4 — Units 6-7", period: 2 },
+  { id: "q5", type: "quiz", label: "Quiz 5 — Units 8-9", period: 2 },
+  { id: "idx1", type: "index", label: "IndEx 1 — Units 1-4", period: 0 },
+  { id: "idx2", type: "index", label: "IndEx 2 — Unit 5", period: 1 },
+  { id: "idx3", type: "index", label: "IndEx 3 — Unit 6a", period: 1 },
+  { id: "idx4", type: "index", label: "IndEx 4 — Unit 6b-7", period: 2 },
+  { id: "idx5", type: "index", label: "IndEx 5 — Units 8-9", period: 2 },
+  { id: "idx6", type: "index", label: "IndEx 6 — Units 10-11", period: 2 },
+];
+
+function newId(prefix) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+
+
+// Migrate a student record from the old fixed-array format (quizzes[5], indexes[6])
+// into the new scores-by-id format, using the DEFAULT assessment ids in original order.
+// Leaves a plaintext `pin` field intact if present - a later async pass hashes it into `pinHash`.
+function migrateStudent(s) {
+  if (s.encData) return s; // already in envelope-encrypted format, nothing to migrate
+  if (s.scores) return s; // already migrated to scores-by-id (legacy plaintext)
+  const scores = {};
+  const oldQuizIds = ["q1", "q2", "q3", "q4", "q5"];
+  const oldIdxIds = ["idx1", "idx2", "idx3", "idx4", "idx5", "idx6"];
+  (s.quizzes || []).forEach((v, i) => { if (v !== null && v !== undefined && oldQuizIds[i]) scores[oldQuizIds[i]] = v; });
+  (s.indexes || []).forEach((v, i) => { if (v !== null && v !== undefined && oldIdxIds[i]) scores[oldIdxIds[i]] = v; });
+  const out = { id: s.id, realName: s.realName || "", codeName: s.codeName, exams: s.exams, scores };
+  if (s.pinHash) out.pinHash = s.pinHash;
+  else if (s.pin) out.pin = s.pin; // plaintext, hashed in the async pass right after this
+  return out;
+}
+
+// Async pass: hash any plaintext `pin` field into `pinHash`, then drop the plaintext field entirely.
+// Already-encrypted records (encData present) are passed through untouched.
+async function hashStudentPins(list) {
+  return Promise.all(
+    list.map(async (s) => {
+      if (s.encData) return s;
+      if (s.pinHash !== undefined && s.pin === undefined) return s;
+      const { pin, ...rest } = s;
+      return { ...rest, pinHash: pin ? await sha256Hex(pin) : (s.pinHash || "") };
+    })
+  );
+}
+
+function avg(arr) {
+  const vals = arr.filter((v) => v !== null && v !== undefined && v !== "" && !isNaN(v)).map(Number);
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function clampNum(v) {
+  if (v === "" || v === null || v === undefined || isNaN(v)) return null;
+  return Math.max(0, Math.min(100, Number(v)));
+}
+
+function assessmentsInPeriod(assessments, type, period) {
+  return assessments.filter((a) => a.type === type && a.period === period);
+}
+
+// Compute grade for ONE period (0=Prelim, 1=Midterm, 2=Final).
+// Step 1: Class Standing = 75% Quiz avg + 25% IndEx avg
+// Step 2: Period Grade = 40% Exam + 60% Class Standing
+// (Numerically identical to the flat 40/45/15 split: 0.6 x 0.75 = 0.45, 0.6 x 0.25 = 0.15)
+function computePeriodGrade(student, periodIdx, assessments) {
+  const examScore = student.exams[periodIdx];
+  const quizItems = assessmentsInPeriod(assessments, "quiz", periodIdx);
+  const idxItems = assessmentsInPeriod(assessments, "index", periodIdx);
+  const quizAvg = avg(quizItems.map((a) => student.scores[a.id]));
+  const idxAvg = avg(idxItems.map((a) => student.scores[a.id]));
+
+  let classStanding = 0, csHasAny = false;
+  if (quizAvg !== null) { classStanding += quizAvg * 0.75; csHasAny = true; }
+  if (idxAvg !== null) { classStanding += idxAvg * 0.25; csHasAny = true; }
+  classStanding = csHasAny ? classStanding : null;
+
+  let total = 0, hasAny = false;
+  if (examScore !== null && examScore !== undefined) { total += examScore * 0.4; hasAny = true; }
+  if (classStanding !== null) { total += classStanding * 0.6; hasAny = true; }
+  total = hasAny ? total : null;
+
+  return { examScore: examScore ?? null, quizAvg, idxAvg, classStanding, total, quizItems, idxItems };
+}
+
+function computeTermAverage(student, assessments) {
+  const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(student, p, assessments).total);
+  let weightedSum = 0, weightUsed = 0;
+  periodGrades.forEach((g, i) => {
+    if (g !== null) { weightedSum += g * PERIOD_WEIGHTS[i]; weightUsed += PERIOD_WEIGHTS[i]; }
+  });
+  if (weightUsed === 0) return null;
+  return weightedSum / weightUsed;
+}
+
+// Build the paste-import column header list dynamically from current assessments.
+function buildImportColumns(assessments) {
+  const cols = ["Real Name", "Code Name", "PIN"];
+  const map = []; // parallel array describing what each column maps to
+  map.push({ k: "realName" }, { k: "codeName" }, { k: "pin" });
+  for (let p = 0; p < 3; p++) {
+    assessmentsInPeriod(assessments, "quiz", p).forEach((a) => { cols.push(a.label); map.push({ k: "score", id: a.id }); });
+    assessmentsInPeriod(assessments, "index", p).forEach((a) => { cols.push(a.label); map.push({ k: "score", id: a.id }); });
+    cols.push(`${EXAM_LABELS[p]} Exam`);
+    map.push({ k: "exam", period: p });
+  }
+  return { cols, map };
+}
+
+// Builds a list of only the fields that would actually change for one import row,
+// comparing against the matched existing student's current plain data (null if this is a new student).
+// PIN changes can't be shown as old->new (PINs are hashed, never stored readable) - flagged separately instead.
+function buildRowDiff(row, existingPlain, assessments, isExisting) {
+  const diffs = [];
+  if (row.pin) {
+    diffs.push({ pinChange: true, isExisting });
+  }
+  row.exams.forEach((v, i) => {
+    if (v === null) return;
+    const oldVal = existingPlain ? existingPlain.exams[i] ?? null : null;
+    if (oldVal !== v) diffs.push({ label: `${EXAM_LABELS[i]} Exam`, oldVal, newVal: v });
+  });
+  Object.keys(row.scores).forEach((id) => {
+    const v = row.scores[id];
+    if (v === null) return;
+    const oldVal = existingPlain ? existingPlain.scores[id] ?? null : null;
+    if (oldVal !== v) {
+      const a = assessments.find((x) => x.id === id);
+      diffs.push({ label: a ? a.label : id, oldVal, newVal: v });
+    }
+  });
+  return diffs;
+}
+
+function parseImportText(text, assessments) {
+  const { map } = buildImportColumns(assessments);
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const rows = [];
+  for (let line of lines) {
+    const cells = (line.includes("\t") ? line.split("\t") : line.split(",")).map((c) => c.trim());
+    if (cells[0] && cells[0].toLowerCase().replace(/\s/g, "") === "realname") continue;
+    if (cells.length < 3 || !cells[1]) continue;
+    const row = { realName: "", codeName: "", pin: "", exams: [null, null, null], scores: {} };
+    map.forEach((m, i) => {
+      const val = cells[i] !== undefined ? cells[i] : "";
+      if (m.k === "realName") row.realName = val;
+      else if (m.k === "codeName") row.codeName = val;
+      else if (m.k === "pin") row.pin = val;
+      else if (m.k === "exam") row.exams[m.period] = clampNum(val);
+      else if (m.k === "score") row.scores[m.id] = clampNum(val);
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function TrussDivider() {
+  return (
+    <svg viewBox="0 0 400 30" className="w-full h-6" preserveAspectRatio="none">
+      <polyline points="0,26 33,4 66,26 99,4 132,26 165,4 198,26 231,4 264,26 297,4 330,26 363,4 400,26" fill="none" stroke={AMBER} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" opacity="0.55" />
+    </svg>
+  );
+}
+
+function ScoreBar({ label, value, color }) {
+  return (
+    <div className="mb-3">
+      <div className="flex justify-between text-xs mb-1" style={{ color: NAVY }}>
+        <span className="font-semibold">{label}</span>
+        <span className="font-bold">{value === null ? "—" : `${value.toFixed(1)}%`}</span>
+      </div>
+      <div className="w-full h-2.5 rounded-full bg-black/5 overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${value ?? 0}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function GradeLookup() {
+  const [view, setView] = useState("landing");
+  const [roster, setRoster] = useState(null);
+  const [assessments, setAssessments] = useState(null);
+  const [error, setError] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [pinInput, setPinInput] = useState("");
+  const [foundStudent, setFoundStudent] = useState(null);
+  const [passInput, setPassInput] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [importText, setImportText] = useState("");
+  const [importPreview, setImportPreview] = useState(null);
+  const [importMsg, setImportMsg] = useState("");
+  const [dashSearch, setDashSearch] = useState("");
+  const [assessDraft, setAssessDraft] = useState(null);
+  const [assessMsg, setAssessMsg] = useState("");
+  const [names, setNames] = useState({});
+  const [decryptedCache, setDecryptedCache] = useState({});
+  const [instructorSecret, setInstructorSecret] = useState("");
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth < 768 : false));
+  const [expandedId, setExpandedId] = useState(null);
+  const [expandedImportRow, setExpandedImportRow] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      let a = DEFAULT_ASSESSMENTS;
+      try {
+        const aRes = await window.storage.get("assessments", true);
+        if (aRes) a = JSON.parse(aRes.value);
+        else await window.storage.set("assessments", JSON.stringify(DEFAULT_ASSESSMENTS), true);
+      } catch (e) {
+        try { await window.storage.set("assessments", JSON.stringify(DEFAULT_ASSESSMENTS), true); } catch (e2) {}
+      }
+      setAssessments(a);
+
+      try {
+        const res = await window.storage.get("roster", true);
+        const raw = res ? JSON.parse(res.value) : [];
+        const migrated = raw.map(migrateStudent);
+        const hashed = await hashStudentPins(migrated);
+        // Strip real names out before they ever touch this browser's memory on a normal page load.
+        // Names live in a separate bucket, fetched only after the instructor passcode is verified.
+        const scrubbed = hashed.map(({ realName, ...rest }) => rest);
+        setRoster(scrubbed);
+        if (JSON.stringify(hashed) !== JSON.stringify(raw)) {
+          try {
+            const namesMap = {};
+            hashed.forEach((s) => { if (s.realName) namesMap[s.id] = s.realName; });
+            const existingNames = await window.storage.get("names", true).catch(() => null);
+            const mergedNames = existingNames ? { ...JSON.parse(existingNames.value), ...namesMap } : namesMap;
+            await window.storage.set("names", JSON.stringify(mergedNames), true);
+            await window.storage.set("roster", JSON.stringify(scrubbed), true);
+          } catch (e) {}
+        }
+      } catch (e) {
+        const msg = (e && e.message ? e.message : String(e)) || "";
+        const looksLikeMissingKey = /not.?found|404|no such key/i.test(msg);
+        setRoster([]);
+        if (!looksLikeMissingKey) {
+          // A genuine failure, not just "no roster saved yet" - surface it instead of silently showing empty.
+          setLoadError(`Could not load saved data (${msg || "unknown error"}). This is NOT the same as "no students yet" - try refreshing. If it keeps happening, the data may not be reaching this device.`);
+        }
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth < 768); }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  async function loadNames() {
+    try {
+      const res = await window.storage.get("names", true);
+      return res ? JSON.parse(res.value) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  async function saveNames(namesMap) {
+    try {
+      await window.storage.set("names", JSON.stringify(namesMap), true);
+    } catch (e) {}
+  }
+
+  // Returns a student object with usable plain exams/scores, whether the record is
+  // legacy plaintext or encrypted (using the decrypted cache built at instructor login).
+  function plainOf(s) {
+    const d = decryptedCache[s.id];
+    if (d) return { ...s, exams: d.exams, scores: d.scores };
+    if (s.encData) return { ...s, exams: [null, null, null], scores: {} }; // not yet decrypted - safe placeholder, avoids a crash
+    return s;
+  }
+
+  async function persistRoster(next) {
+    setRoster(next);
+    try {
+      await window.storage.set("roster", JSON.stringify(next), true);
+    } catch (e) {
+      setSaveMsg("Save failed — check your connection and try again.");
+    }
+  }
+
+  async function persistAssessments(next) {
+    setAssessments(next);
+    try {
+      await window.storage.set("assessments", JSON.stringify(next), true);
+    } catch (e) {
+      setAssessMsg("Save failed — check your connection and try again.");
+    }
+  }
+
+  async function handleStudentLogin() {
+    setError("");
+    const codeMatch = (roster || []).find((s) => s.codeName.trim().toLowerCase() === codeInput.trim().toLowerCase());
+    const pin = pinInput.trim();
+    if (!codeMatch || !pin) {
+      setError("No match for that code name and PIN. Double-check both and try again.");
+      return;
+    }
+    try {
+      if (codeMatch.encData) {
+        const plain = await decryptWithPin(codeMatch, codeMatch.id, pin);
+        setFoundStudent({ id: codeMatch.id, codeName: codeMatch.codeName, ...plain });
+      } else {
+        const hash = await sha256Hex(pin);
+        if (codeMatch.pinHash !== hash) throw new Error("mismatch");
+        setFoundStudent(codeMatch);
+      }
+      setView("studentDashboard");
+    } catch (e) {
+      setError("No match for that code name and PIN. Double-check both and try again.");
+    }
+  }
+
+  async function handleInstructorLogin() {
+    setError("");
+    const hash = await sha256Hex(passInput);
+    if (hash !== INSTRUCTOR_PASSCODE_HASH) {
+      setError("Incorrect passcode.");
+      return;
+    }
+    const secret = passInput;
+    const namesMap = await loadNames();
+    setNames(namesMap);
+    const cache = {};
+    const wrapKey = await deriveWrapKey(secret, INSTRUCTOR_SALT);
+    for (const s of roster) {
+      if (s.encData) {
+        try {
+          const dek = await unwrapDEK(wrapKey, s.encInstructorKey);
+          cache[s.id] = await decryptJSON(dek, s.encData);
+        } catch (e) {
+          cache[s.id] = { exams: [null, null, null], scores: {} };
+        }
+      } else {
+        cache[s.id] = { exams: s.exams, scores: s.scores };
+      }
+    }
+    setDecryptedCache(cache);
+    setInstructorSecret(secret);
+    setView("instructorRoster");
+  }
+
+  function goToLanding() {
+    setDecryptedCache({});
+    setInstructorSecret("");
+    setFoundStudent(null);
+    setView("landing");
+  }
+
+  function openEdit(student) {
+    const p = plainOf(student);
+    setDraft({ id: p.id, codeName: p.codeName, exams: [...p.exams], scores: { ...p.scores }, realName: names[p.id] || "", pin: "" });
+    setView("instructorEdit");
+  }
+
+  function openNew() {
+    setDraft({ id: newId("s"), codeName: "", exams: [null, null, null], scores: {}, realName: "", pin: "" });
+    setView("instructorEdit");
+  }
+
+  async function saveDraft() {
+    const existingRaw = roster.find((s) => s.id === draft.id);
+    const exists = !!existingRaw;
+    if (!draft.codeName.trim()) {
+      setSaveMsg("Code name is required.");
+      return;
+    }
+    if (!exists && !draft.pin.trim()) {
+      setSaveMsg("PIN is required for a new student.");
+      return;
+    }
+    setSaving(true);
+    const plainData = { exams: draft.exams, scores: draft.scores };
+    let finalStudent;
+    try {
+      if (draft.pin && draft.pin.trim()) {
+        // Fresh PIN provided - full fresh envelope encryption (also upgrades a legacy record).
+        const enc = await encryptStudentData(draft.id, plainData, draft.pin.trim(), instructorSecret);
+        finalStudent = { id: draft.id, codeName: draft.codeName, ...enc };
+      } else if (existingRaw && existingRaw.encData) {
+        // Already encrypted, PIN unchanged - reuse the same DEK (unwrapped via instructor passcode) to re-encrypt updated data.
+        const wrapKey = await deriveWrapKey(instructorSecret, INSTRUCTOR_SALT);
+        const dek = await unwrapDEK(wrapKey, existingRaw.encInstructorKey);
+        const encData = await encryptJSON(dek, plainData);
+        finalStudent = { ...existingRaw, codeName: draft.codeName, encData };
+      } else {
+        // Legacy record, no new PIN typed - stays legacy for now (upgrades next time a PIN is set or via re-import).
+        finalStudent = { id: draft.id, codeName: draft.codeName, pinHash: existingRaw ? existingRaw.pinHash : "", exams: draft.exams, scores: draft.scores };
+      }
+    } catch (e) {
+      setSaving(false);
+      setSaveMsg("Encryption error — nothing was saved. Try again.");
+      return;
+    }
+    const next = exists ? roster.map((s) => (s.id === finalStudent.id ? finalStudent : s)) : [...roster, finalStudent];
+    await persistRoster(next);
+    setDecryptedCache((prev) => ({ ...prev, [finalStudent.id]: plainData }));
+    const nextNames = { ...names, [finalStudent.id]: draft.realName };
+    setNames(nextNames);
+    await saveNames(nextNames);
+    setSaving(false);
+    setSaveMsg("Saved.");
+    setTimeout(() => setSaveMsg(""), 1800);
+    setView("instructorRoster");
+  }
+
+  async function deleteStudent(id) {
+    const next = roster.filter((s) => s.id !== id);
+    await persistRoster(next);
+    const nextNames = { ...names };
+    delete nextNames[id];
+    setNames(nextNames);
+    await saveNames(nextNames);
+    setDecryptedCache((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+  }
+
+  function updateDraftExam(period, value) {
+    setDraft((d) => {
+      const exams = [...d.exams];
+      exams[period] = clampNum(value);
+      return { ...d, exams };
+    });
+  }
+
+  function updateDraftScore(assessmentId, value) {
+    setDraft((d) => ({ ...d, scores: { ...d.scores, [assessmentId]: clampNum(value) } }));
+  }
+
+  function handlePreviewImport() {
+    const rows = parseImportText(importText, assessments);
+    setImportPreview(rows);
+    setImportMsg("");
+    setExpandedImportRow(null);
+  }
+
+  async function handleConfirmImport() {
+    if (!importPreview || importPreview.length === 0) return;
+    let next = [...roster];
+    let nextNames = { ...names };
+    let nextCache = { ...decryptedCache };
+    let created = 0, updated = 0, skipped = 0;
+    for (const row of importPreview) {
+      if (!row.codeName) { skipped++; continue; }
+      const idx = next.findIndex((s) => s.codeName.trim().toLowerCase() === row.codeName.trim().toLowerCase());
+      if (idx >= 0) {
+        const existing = next[idx];
+        const existingPlain = nextCache[existing.id] || (existing.encData ? { exams: existing.exams || [null, null, null], scores: {} } : { exams: existing.exams, scores: existing.scores });
+        const mergedScores = { ...existingPlain.scores };
+        Object.keys(row.scores).forEach((k) => { if (row.scores[k] !== null) mergedScores[k] = row.scores[k]; });
+        const mergedExams = existingPlain.exams.map((v, i) => (row.exams[i] !== null ? row.exams[i] : v));
+        const plainData = { exams: mergedExams, scores: mergedScores };
+        let updatedRecord;
+        try {
+          if (row.pin) {
+            const enc = await encryptStudentData(existing.id, plainData, row.pin, instructorSecret);
+            updatedRecord = { id: existing.id, codeName: row.codeName, ...enc };
+          } else if (existing.encData) {
+            const wrapKey = await deriveWrapKey(instructorSecret, INSTRUCTOR_SALT);
+            const dek = await unwrapDEK(wrapKey, existing.encInstructorKey);
+            const encData = await encryptJSON(dek, plainData);
+            updatedRecord = { ...existing, codeName: row.codeName, encData };
+          } else {
+            updatedRecord = { id: existing.id, codeName: row.codeName, pinHash: existing.pinHash, exams: mergedExams, scores: mergedScores };
+          }
+        } catch (e) {
+          skipped++; continue;
+        }
+        next[idx] = updatedRecord;
+        nextCache[existing.id] = plainData;
+        if (row.realName) nextNames[existing.id] = row.realName;
+        updated++;
+      } else {
+        if (!row.pin) { skipped++; continue; }
+        const cleanScores = {};
+        Object.keys(row.scores).forEach((k) => { if (row.scores[k] !== null) cleanScores[k] = row.scores[k]; });
+        const id = newId("s");
+        const plainData = { exams: row.exams, scores: cleanScores };
+        try {
+          const enc = await encryptStudentData(id, plainData, row.pin, instructorSecret);
+          next.push({ id, codeName: row.codeName, ...enc });
+          nextCache[id] = plainData;
+        } catch (e) {
+          skipped++; continue;
+        }
+        if (row.realName) nextNames[id] = row.realName;
+        created++;
+      }
+    }
+    await persistRoster(next);
+    setDecryptedCache(nextCache);
+    setNames(nextNames);
+    await saveNames(nextNames);
+    setImportMsg(`Done — ${created} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing code name/PIN, or an encryption error)` : ""}.`);
+    setImportPreview(null);
+    setImportText("");
+    setExpandedImportRow(null);
+  }
+
+  // ---- Manage Assessments ----
+  function openManageAssessments() {
+    setAssessDraft(JSON.parse(JSON.stringify(assessments)));
+    setAssessMsg("");
+    setView("instructorAssessments");
+  }
+
+  function addAssessment(type) {
+    setAssessDraft((list) => [...list, { id: newId(type === "quiz" ? "q" : "idx"), type, label: type === "quiz" ? "New Quiz" : "New IndEx", period: 0 }]);
+  }
+
+  function updateAssessment(id, field, value) {
+    setAssessDraft((list) => list.map((a) => (a.id === id ? { ...a, [field]: field === "period" ? Number(value) : value } : a)));
+  }
+
+  function removeAssessmentDraft(id) {
+    setAssessDraft((list) => list.filter((a) => a.id !== id));
+  }
+
+  async function saveAssessments() {
+    const removedIds = assessments.filter((a) => !assessDraft.some((d) => d.id === a.id)).map((a) => a.id);
+    await persistAssessments(assessDraft);
+    if (removedIds.length > 0) {
+      const wrapKey = await deriveWrapKey(instructorSecret, INSTRUCTOR_SALT);
+      const nextCache = { ...decryptedCache };
+      const nextRoster = [];
+      for (const s of roster) {
+        if (s.encData) {
+          try {
+            const plain = nextCache[s.id] || (await decryptWithInstructorPasscode(s, instructorSecret));
+            const scores = { ...plain.scores };
+            removedIds.forEach((id) => delete scores[id]);
+            const plainData = { exams: plain.exams, scores };
+            const dek = await unwrapDEK(wrapKey, s.encInstructorKey);
+            const encData = await encryptJSON(dek, plainData);
+            nextRoster.push({ ...s, encData });
+            nextCache[s.id] = plainData;
+          } catch (e) {
+            nextRoster.push(s); // leave untouched if decrypt fails
+          }
+        } else {
+          const scores = { ...s.scores };
+          removedIds.forEach((id) => delete scores[id]);
+          nextRoster.push({ ...s, scores });
+          nextCache[s.id] = { exams: s.exams, scores };
+        }
+      }
+      await persistRoster(nextRoster);
+      setDecryptedCache(nextCache);
+    }
+    setAssessMsg("Saved. Scores for any removed items were cleared.");
+    setTimeout(() => { setAssessMsg(""); setView("instructorRoster"); }, 1400);
+  }
+
+  const shellStyle = { background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DEEP} 100%)`, minHeight: "100%" };
+
+  if (roster === null || assessments === null) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[400px]" style={shellStyle}>
+        <div className="text-white/70 text-sm">Loading…</div>
+      </div>
+    );
+  }
+
+  const { cols: importCols } = buildImportColumns(assessments);
+
+  return (
+    <div style={shellStyle} className="min-h-full w-full flex flex-col items-center px-4 py-8 font-sans">
+      <div className={view === "instructorDashboard" ? "w-full max-w-5xl" : "w-full max-w-md"}>
+        {/* Header */}
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3" style={{ backgroundColor: "rgba(247,201,72,0.12)" }}>
+            <svg viewBox="0 0 100 100" className="w-9 h-9">
+              <polyline points="15,68 32,35 50,68 68,35 85,68" fill="none" stroke={AMBER} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1="15" y1="68" x2="85" y2="68" stroke={AMBER} strokeWidth="7" strokeLinecap="round" />
+              <line x1="32" y1="35" x2="68" y2="35" stroke={AMBER} strokeWidth="7" strokeLinecap="round" />
+            </svg>
+          </div>
+          <h1 className="text-white text-lg font-bold tracking-wide text-center">THEORY OF STRUCTURES</h1>
+          <p className="text-white/50 text-xs tracking-wider mt-0.5">GRADE LOOKUP</p>
+        </div>
+
+        {/* LANDING */}
+        {view === "landing" && (
+          <div className="space-y-3">
+            {loadError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+                <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-red-700">{loadError}</p>
+              </div>
+            )}
+            <button
+              onClick={() => { setView("studentLogin"); setError(""); setCodeInput(""); setPinInput(""); }}
+              className="w-full bg-white rounded-2xl p-5 flex items-center gap-4 text-left hover:brightness-95 transition"
+            >
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: AMBER }}>
+                <User size={22} color={NAVY} />
+              </div>
+              <div>
+                <div className="font-bold" style={{ color: NAVY }}>I'm a Student</div>
+                <div className="text-xs text-gray-500 mt-0.5">Check your own grade with your code name + PIN</div>
+              </div>
+            </button>
+            <button
+              onClick={() => { setView("instructorLogin"); setError(""); setPassInput(""); }}
+              className="w-full rounded-2xl p-5 flex items-center gap-4 text-left border border-white/15 hover:bg-white/5 transition"
+            >
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+                <Lock size={20} color="white" />
+              </div>
+              <div>
+                <div className="font-bold text-white">Instructor</div>
+                <div className="text-xs text-white/50 mt-0.5">Manage the roster and update scores</div>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* STUDENT LOGIN */}
+        {view === "studentLogin" && (
+          <div className="bg-white rounded-2xl p-6">
+            <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-gray-400 mb-4 hover:text-gray-600">
+              <ChevronLeft size={14} /> Back
+            </button>
+            <h2 className="font-bold text-lg mb-1" style={{ color: NAVY }}>Enter your details</h2>
+            <p className="text-xs text-gray-500 mb-4">Use the code name and PIN given to you in class.</p>
+            <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>Code Name</label>
+            <input
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              placeholder="e.g. Falcon22"
+              className="w-full border rounded-lg px-3 py-2.5 mb-3 text-sm outline-none focus:ring-2"
+              style={{ borderColor: "#ddd" }}
+            />
+            <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>PIN</label>
+            <input
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              placeholder="6-digit PIN"
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              onKeyDown={(e) => e.key === "Enter" && handleStudentLogin()}
+              className="w-full border rounded-lg px-3 py-2.5 mb-4 text-sm outline-none focus:ring-2"
+              style={{ borderColor: "#ddd" }}
+            />
+            {error && <div className="text-xs text-red-600 mb-3">{error}</div>}
+            <button onClick={handleStudentLogin} className="w-full rounded-lg py-3 font-bold text-sm" style={{ backgroundColor: NAVY, color: "white" }}>
+              View My Grade
+            </button>
+          </div>
+        )}
+
+        {/* STUDENT DASHBOARD */}
+        {view === "studentDashboard" && foundStudent && (() => {
+          const term = computeTermAverage(foundStudent, assessments);
+          const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(foundStudent, p, assessments));
+          return (
+            <div className="space-y-4">
+              <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+                <ChevronLeft size={14} /> Back
+              </button>
+              <div className="bg-white rounded-2xl p-6 text-center">
+                <div className="text-xs font-semibold tracking-wide text-gray-400 mb-1">{foundStudent.codeName}</div>
+                <div className="text-5xl font-extrabold" style={{ color: NAVY }}>
+                  {term === null ? "—" : term.toFixed(1)}
+                  {term !== null && <span className="text-xl font-bold text-gray-400">%</span>}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">Term average (Prelim 30% + Midterm 30% + Final 40%)</div>
+                <TrussDivider />
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  {PERIODS.map((label, p) => (
+                    <div key={label} className="rounded-xl py-2.5" style={{ backgroundColor: `${PERIOD_COLORS[p]}14` }}>
+                      <div className="text-[10px] font-bold tracking-wide" style={{ color: PERIOD_COLORS[p] }}>{label.toUpperCase()} · {PERIOD_WEIGHTS[p] * 100}%</div>
+                      <div className="text-lg font-extrabold" style={{ color: NAVY }}>
+                        {periodGrades[p].total === null ? "—" : periodGrades[p].total.toFixed(1)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {PERIODS.map((label, p) => {
+                const pg = periodGrades[p];
+                return (
+                  <div key={label} className="bg-white rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="text-sm font-bold" style={{ color: PERIOD_COLORS[p] }}>{label} Period</div>
+                      <div className="text-sm font-extrabold" style={{ color: NAVY }}>{pg.total === null ? "—" : `${pg.total.toFixed(1)}%`}</div>
+                    </div>
+                    <ScoreBar label="Exam (40%)" value={pg.examScore} color={NAVY} />
+                    <ScoreBar label="Class Standing (60%)" value={pg.classStanding} color={AMBER_DEEP} />
+                    <div className="pl-4 -mt-1 mb-3 border-l-2" style={{ borderColor: "#f0f0f0" }}>
+                      <ScoreBar label="↳ Quizzes (75% of Class Standing)" value={pg.quizAvg} color={AMBER_DEEP} />
+                      <ScoreBar label="↳ IndEx (25% of Class Standing)" value={pg.idxAvg} color={STEEL} />
+                    </div>
+                    <div className="mt-3 pt-3 border-t" style={{ borderColor: "#f0f0f0" }}>
+                      {pg.quizItems.map((a) => (
+                        <div key={a.id} className="flex justify-between text-xs py-1">
+                          <span className="text-gray-500">{a.label}</span>
+                          <span className="font-semibold" style={{ color: NAVY }}>{foundStudent.scores[a.id] === undefined ? "—" : `${foundStudent.scores[a.id]}%`}</span>
+                        </div>
+                      ))}
+                      {pg.idxItems.map((a) => (
+                        <div key={a.id} className="flex justify-between text-xs py-1">
+                          <span className="text-gray-500">{a.label}</span>
+                          <span className="font-semibold" style={{ color: NAVY }}>{foundStudent.scores[a.id] === undefined ? "—" : `${foundStudent.scores[a.id]}%`}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between text-xs py-1">
+                        <span className="text-gray-500">{EXAM_LABELS[p]} Exam</span>
+                        <span className="font-semibold" style={{ color: NAVY }}>{foundStudent.exams[p] === null || foundStudent.exams[p] === undefined ? "—" : `${foundStudent.exams[p]}%`}</span>
+                      </div>
+                      {pg.quizItems.length === 0 && pg.idxItems.length === 0 && (
+                        <div className="text-xs text-gray-300 italic py-1">No quizzes or IndEx currently assigned to this period.</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {/* INSTRUCTOR LOGIN */}
+        {view === "instructorLogin" && (
+          <div className="bg-white rounded-2xl p-6">
+            <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-gray-400 mb-4 hover:text-gray-600">
+              <ChevronLeft size={14} /> Back
+            </button>
+            <div className="flex items-center gap-2 mb-1">
+              <KeyRound size={18} color={NAVY} />
+              <h2 className="font-bold text-lg" style={{ color: NAVY }}>Instructor Access</h2>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Enter the instructor passcode to manage the roster.</p>
+            <input
+              value={passInput}
+              onChange={(e) => setPassInput(e.target.value)}
+              type="password"
+              placeholder="Passcode"
+              onKeyDown={(e) => e.key === "Enter" && handleInstructorLogin()}
+              className="w-full border rounded-lg px-3 py-2.5 mb-4 text-sm outline-none focus:ring-2"
+              style={{ borderColor: "#ddd" }}
+            />
+            {error && (
+              <div className="flex items-center gap-1.5 text-xs text-red-600 mb-3">
+                <ShieldAlert size={14} /> {error}
+              </div>
+            )}
+            <button onClick={handleInstructorLogin} className="w-full rounded-lg py-3 font-bold text-sm" style={{ backgroundColor: NAVY, color: "white" }}>
+              Enter
+            </button>
+          </div>
+        )}
+
+        {/* INSTRUCTOR ROSTER */}
+        {view === "instructorRoster" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+                <ChevronLeft size={14} /> Back
+              </button>
+              <span className="text-xs text-white/50">{roster.length} student{roster.length !== 1 ? "s" : ""}</span>
+            </div>
+            <button onClick={openNew} className="w-full rounded-xl py-3 flex items-center justify-center gap-2 font-bold text-sm" style={{ backgroundColor: AMBER, color: NAVY }}>
+              <Plus size={16} /> Add Student
+            </button>
+            <button
+              onClick={openManageAssessments}
+              className="w-full rounded-xl py-3 flex items-center justify-center gap-2 font-bold text-sm border border-white/15 text-white hover:bg-white/5 transition"
+            >
+              <Settings2 size={16} /> Manage Quizzes & IndEx
+            </button>
+            <button
+              onClick={() => { setView("instructorDashboard"); setDashSearch(""); }}
+              className="w-full rounded-xl py-3 flex items-center justify-center gap-2 font-bold text-sm border border-white/15 text-white hover:bg-white/5 transition"
+            >
+              <LayoutDashboard size={16} /> View Dashboard
+            </button>
+            <button
+              onClick={() => { setView("instructorImport"); setImportText(""); setImportPreview(null); setImportMsg(""); setExpandedImportRow(null); }}
+              className="w-full rounded-xl py-3 flex items-center justify-center gap-2 font-bold text-sm border border-white/15 text-white hover:bg-white/5 transition"
+            >
+              <ClipboardPaste size={16} /> Import from Sheet
+            </button>
+            <div className="space-y-2">
+              {roster.length === 0 && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-5 text-center text-white/40 text-sm">
+                  No students yet. Add your first one above.
+                </div>
+              )}
+              {roster.map((s) => {
+                const term = computeTermAverage(plainOf(s), assessments);
+                return (
+                  <div key={s.id} className="bg-white rounded-xl p-4 flex items-center justify-between">
+                    <button onClick={() => openEdit(s)} className="flex-1 text-left">
+                      <div className="text-[11px] text-gray-400">{names[s.id] || "—"}</div>
+                      <div className="font-semibold text-sm" style={{ color: NAVY }}>{s.codeName || "(unnamed)"}</div>
+                      <div className="text-xs text-gray-400">Term avg: {term === null ? "—" : `${term.toFixed(1)}%`}</div>
+                    </button>
+                    <button onClick={() => deleteStudent(s.id)} className="p-2 text-gray-300 hover:text-red-500 transition">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* INSTRUCTOR MANAGE ASSESSMENTS */}
+        {view === "instructorAssessments" && assessDraft && (
+          <div className="space-y-3">
+            <button onClick={() => setView("instructorRoster")} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+              <ChevronLeft size={14} /> Back to roster
+            </button>
+            <div className="bg-white rounded-2xl p-5">
+              <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>Manage Quizzes & IndEx</div>
+              <p className="text-xs text-gray-500 mb-4">Rename, move to a different period, remove, or add. The 40/45/15 formula always applies per period, no matter how many items it has.</p>
+
+              {["quiz", "index"].map((type) => (
+                <div key={type} className="mb-5">
+                  <div className="text-xs font-bold tracking-wide mb-2" style={{ color: type === "quiz" ? AMBER_DEEP : STEEL }}>
+                    {type === "quiz" ? "QUIZZES" : "INDEX (INDEX)"}
+                  </div>
+                  <div className="space-y-2">
+                    {assessDraft.filter((a) => a.type === type).map((a) => (
+                      <div key={a.id} className="flex items-center gap-2 bg-gray-50 rounded-lg p-2">
+                        <input
+                          value={a.label}
+                          onChange={(e) => updateAssessment(a.id, "label", e.target.value)}
+                          className="flex-1 border rounded-md px-2 py-1.5 text-sm outline-none"
+                          style={{ borderColor: "#ddd" }}
+                        />
+                        <select
+                          value={a.period}
+                          onChange={(e) => updateAssessment(a.id, "period", e.target.value)}
+                          className="border rounded-md px-1.5 py-1.5 text-xs outline-none"
+                          style={{ borderColor: "#ddd" }}
+                        >
+                          {PERIODS.map((p, i) => <option key={p} value={i}>{p}</option>)}
+                        </select>
+                        <button onClick={() => removeAssessmentDraft(a.id)} className="p-1.5 text-gray-300 hover:text-red-500 transition">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+                    {assessDraft.filter((a) => a.type === type).length === 0 && (
+                      <div className="text-xs text-gray-300 italic">None currently.</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => addAssessment(type)}
+                    className="mt-2 text-xs font-semibold flex items-center gap-1"
+                    style={{ color: type === "quiz" ? AMBER_DEEP : STEEL }}
+                  >
+                    <Plus size={13} /> Add {type === "quiz" ? "Quiz" : "IndEx"}
+                  </button>
+                </div>
+              ))}
+
+              {assessMsg && (
+                <div className="flex items-center gap-1.5 text-xs bg-amber-50 rounded-lg px-3 py-2 mb-3" style={{ color: NAVY }}>
+                  <CheckCircle2 size={14} /> {assessMsg}
+                </div>
+              )}
+              <button onClick={saveAssessments} className="w-full rounded-lg py-3 font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: NAVY }}>
+                <Save size={16} /> Save Changes
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2">Removing an item clears any scores students had for it — this can't be undone.</p>
+            </div>
+          </div>
+        )}
+
+        {/* INSTRUCTOR IMPORT */}
+        {view === "instructorImport" && (
+          <div className="space-y-3">
+            <button onClick={() => setView("instructorRoster")} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+              <ChevronLeft size={14} /> Back to roster
+            </button>
+            <div className="bg-white rounded-2xl p-5">
+              <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>Import from Google Sheets</div>
+              <p className="text-xs text-gray-500 mb-3">
+                Arrange your sheet's columns in this exact order (this updates automatically if you rename/move/add items under Manage Quizzes & IndEx), select the rows, and copy (Ctrl/Cmd+C). Paste below.
+              </p>
+              <div className="bg-gray-50 rounded-lg p-3 mb-3 overflow-x-auto">
+                <div className="text-[10px] text-gray-500 whitespace-nowrap font-mono">
+                  {importCols.join(" | ")}
+                </div>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">
+                Existing code names get updated (blank cells keep the current value). New code names get added — they need at least a PIN to be created.
+              </p>
+              <textarea
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder="Paste copied rows here…"
+                rows={6}
+                className="w-full border rounded-lg px-3 py-2 text-xs font-mono outline-none mb-3"
+                style={{ borderColor: "#ddd" }}
+              />
+              <button onClick={handlePreviewImport} disabled={!importText.trim()} className="w-full rounded-lg py-2.5 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-40" style={{ backgroundColor: NAVY, color: "white" }}>
+                Preview <ArrowRight size={14} />
+              </button>
+            </div>
+
+            {importPreview && (() => {
+              const totalFields = 3 + assessments.length; // 3 exams + every quiz/IndEx currently defined
+              return (
+                <div className="bg-white rounded-2xl p-5">
+                  <div className="text-sm font-bold mb-1" style={{ color: NAVY }}>{importPreview.length} row{importPreview.length !== 1 ? "s" : ""} parsed</div>
+                  <p className="text-[11px] text-gray-400 mb-3">Check each row before confirming — especially whether it says New or Update, and that the field count looks right.</p>
+                  <div className="max-h-64 overflow-y-auto mb-3 space-y-1.5">
+                    {importPreview.map((r, i) => {
+                      const matched = roster.find((s) => s.codeName.trim().toLowerCase() === r.codeName.trim().toLowerCase());
+                      const isExisting = !!matched;
+                      const filledCount = r.exams.filter((v) => v !== null).length + Object.values(r.scores).filter((v) => v !== null).length;
+                      const willSkip = !r.codeName || (!isExisting && !r.pin);
+                      const isOpen = expandedImportRow === i;
+                      const existingPlain = matched ? plainOf(matched) : null;
+                      const diffs = willSkip ? [] : buildRowDiff(r, existingPlain, assessments, isExisting);
+                      return (
+                        <div key={i} className="border-b" style={{ borderColor: "#f5f5f5" }}>
+                          <button
+                            onClick={() => setExpandedImportRow(isOpen ? null : i)}
+                            disabled={willSkip}
+                            className="w-full flex items-center justify-between text-xs py-1.5 text-left disabled:cursor-default"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0"
+                                style={{
+                                  backgroundColor: willSkip ? "#F3D9D9" : isExisting ? "#D6E4F0" : "#FDF3DC",
+                                  color: willSkip ? "#B23B3B" : isExisting ? STEEL : AMBER_DEEP,
+                                }}
+                              >
+                                {willSkip ? "SKIP" : isExisting ? "UPDATE" : "NEW"}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="text-gray-700 font-medium truncate">{r.codeName || "(missing code name)"}</div>
+                                {r.realName && <div className="text-gray-400 text-[10px] truncate">{r.realName}</div>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                              <div className="text-right">
+                                <div className="text-gray-500">{filledCount}/{totalFields} grades</div>
+                                <div className="text-gray-400 text-[10px]">{r.pin ? "PIN included" : isExisting ? "PIN unchanged" : "no PIN"}</div>
+                              </div>
+                              {!willSkip && (isOpen ? <ChevronUp size={13} className="text-gray-300" /> : <ChevronDown size={13} className="text-gray-300" />)}
+                            </div>
+                          </button>
+                          {isOpen && !willSkip && (
+                            <div className="pb-2 pl-1">
+                              {diffs.length === 0 ? (
+                                <div className="text-[11px] text-gray-400 italic py-1">No changes — pasted values match what's already saved.</div>
+                              ) : (
+                                diffs.map((d, di) =>
+                                  d.pinChange ? (
+                                    <div key={di} className="flex items-center gap-1.5 text-[11px] py-1 font-semibold" style={{ color: AMBER_DEEP }}>
+                                      <KeyRound size={11} />
+                                      {d.isExisting ? "PIN will be changed" : "PIN will be set"}
+                                    </div>
+                                  ) : (
+                                    <div key={di} className="flex items-center justify-between text-[11px] py-1">
+                                      <span className="text-gray-500">{d.label}</span>
+                                      <span className="font-medium">
+                                        <span className="text-gray-400">{d.oldVal === null ? "—" : d.oldVal}</span>
+                                        <span className="text-gray-300 mx-1">→</span>
+                                        <span style={{ color: NAVY }}>{d.newVal}</span>
+                                      </span>
+                                    </div>
+                                  )
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={handleConfirmImport} className="w-full rounded-lg py-2.5 font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: NAVY }}>
+                    <CheckCircle2 size={16} /> Confirm Import
+                  </button>
+                </div>
+              );
+            })()}
+
+            {importMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-white bg-white/10 rounded-lg px-3 py-2">
+                <CheckCircle2 size={14} /> {importMsg}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* INSTRUCTOR DASHBOARD */}
+        {view === "instructorDashboard" && (() => {
+          const q = dashSearch.trim().toLowerCase();
+          const filtered = roster.filter(
+            (s) => !q || (names[s.id] || "").toLowerCase().includes(q) || s.codeName.toLowerCase().includes(q)
+          );
+          const cell = (v) => (v === null || v === undefined ? <span className="text-gray-300">—</span> : `${v}`);
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <button onClick={() => setView("instructorRoster")} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+                  <ChevronLeft size={14} /> Back to roster
+                </button>
+                <span className="text-xs text-white/50">{filtered.length} of {roster.length} shown</span>
+              </div>
+
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={dashSearch}
+                  onChange={(e) => setDashSearch(e.target.value)}
+                  placeholder="Search by name or code name…"
+                  className="w-full border rounded-lg pl-9 pr-3 py-2.5 text-sm outline-none bg-white"
+                  style={{ borderColor: "#ddd" }}
+                />
+              </div>
+
+              {isMobile ? (
+                <div className="space-y-2">
+                  {filtered.map((s) => {
+                    const p_ = plainOf(s);
+                    const term = computeTermAverage(p_, assessments);
+                    const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(p_, p, assessments));
+                    const isOpen = expandedId === s.id;
+                    return (
+                      <div key={s.id} className="bg-white rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => setExpandedId(isOpen ? null : s.id)}
+                          className="w-full flex items-center justify-between p-4 text-left"
+                        >
+                          <div>
+                            <div className="text-[11px] text-gray-400">{names[s.id] || "—"}</div>
+                            <div className="font-semibold text-sm" style={{ color: NAVY }}>{s.codeName || "(unnamed)"}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-right">
+                              <div className="text-[10px] text-gray-400">Term Avg</div>
+                              <div className="font-bold text-sm" style={{ color: NAVY }}>{term === null ? "—" : `${term.toFixed(1)}%`}</div>
+                            </div>
+                            {isOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                          </div>
+                        </button>
+                        {isOpen && (
+                          <div className="px-4 pb-4 border-t" style={{ borderColor: "#f0f0f0" }}>
+                            {PERIODS.map((label, p) => (
+                              <div key={label} className="pt-3 pb-1">
+                                <div className="text-xs font-bold mb-1.5" style={{ color: PERIOD_COLORS[p] }}>{label}</div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div className="bg-gray-50 rounded-lg py-1.5 text-center">
+                                    <div className="text-[9px] text-gray-400">C.Stand</div>
+                                    <div className="text-xs font-bold" style={{ color: STEEL }}>
+                                      {periodGrades[p].classStanding === null ? "—" : periodGrades[p].classStanding.toFixed(1)}
+                                    </div>
+                                  </div>
+                                  <div className="bg-gray-50 rounded-lg py-1.5 text-center">
+                                    <div className="text-[9px] text-gray-400">Exam</div>
+                                    <div className="text-xs font-bold" style={{ color: AMBER_DEEP }}>{cell(p_.exams[p])}</div>
+                                  </div>
+                                  <div className="rounded-lg py-1.5 text-center" style={{ backgroundColor: `${PERIOD_COLORS[p]}14` }}>
+                                    <div className="text-[9px] text-gray-400">Grade</div>
+                                    <div className="text-xs font-bold" style={{ color: PERIOD_COLORS[p] }}>
+                                      {periodGrades[p].total === null ? "—" : periodGrades[p].total.toFixed(1)}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                            <button
+                              onClick={() => openEdit(s)}
+                              className="mt-3 w-full text-center py-2.5 rounded-lg text-xs font-bold"
+                              style={{ backgroundColor: NAVY, color: "white" }}
+                            >
+                              Edit Full Details
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-5 text-center text-white/40 text-sm">No matches.</div>
+                  )}
+                </div>
+              ) : (
+              <div className="bg-white rounded-2xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs whitespace-nowrap">
+                    <thead>
+                      <tr style={{ backgroundColor: NAVY }}>
+                        <th className="text-left px-3 py-2.5 text-white font-bold sticky left-0" style={{ backgroundColor: NAVY }}>Real Name</th>
+                        <th className="text-left px-3 py-2.5 text-white font-bold">Code Name</th>
+                        <th className="text-left px-3 py-2.5 text-white font-bold">PIN</th>
+                        {[0, 1, 2].map((p) => (
+                          <Fragment key={p}>
+                            {assessmentsInPeriod(assessments, "quiz", p).map((a) => (
+                              <th key={a.id} className="text-right px-2 py-2.5 text-white font-bold" title={a.label}>{a.label.split("—")[0].trim()}</th>
+                            ))}
+                            {assessmentsInPeriod(assessments, "index", p).map((a) => (
+                              <th key={a.id} className="text-right px-2 py-2.5 text-white font-bold" title={a.label}>{a.label.split("—")[0].trim()}</th>
+                            ))}
+                            <th className="text-right px-2 py-2.5 font-bold" style={{ color: STEEL }} title="75% Quiz avg + 25% IndEx avg">C.Stand</th>
+                            <th className="text-right px-2 py-2.5 font-bold" style={{ color: AMBER_DEEP }}>{EXAM_LABELS[p]}</th>
+                            <th className="text-right px-2 py-2.5 font-bold" style={{ backgroundColor: PERIOD_COLORS[p], color: "white" }} title="40% Exam + 60% Class Standing">{PERIODS[p]} Grade</th>
+                          </Fragment>
+                        ))}
+                        <th className="text-right px-3 py-2.5 text-white font-bold" style={{ backgroundColor: AMBER_DEEP, color: NAVY }}>Term Avg</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((s, ri) => {
+                        const p_ = plainOf(s);
+                        const term = computeTermAverage(p_, assessments);
+                        const periodGrades = [0, 1, 2].map((p) => computePeriodGrade(p_, p, assessments));
+                        const rowBg = ri % 2 === 0 ? "white" : "#F7F8FA";
+                        return (
+                          <tr key={s.id} onClick={() => openEdit(s)} className="cursor-pointer hover:bg-amber-50 transition" style={{ backgroundColor: rowBg }}>
+                            <td className="px-3 py-2 font-semibold sticky left-0" style={{ color: NAVY, backgroundColor: rowBg }}>{names[s.id] || <span className="text-gray-300 font-normal">—</span>}</td>
+                            <td className="px-3 py-2 text-gray-600">{s.codeName || <span className="text-gray-300">—</span>}</td>
+                            <td className="px-3 py-2 text-gray-400">{(s.pinHash || s.encStudentKey) ? "●●●●●●" : <span className="text-gray-300">not set</span>}</td>
+                            {[0, 1, 2].map((p) => (
+                              <Fragment key={p}>
+                                {assessmentsInPeriod(assessments, "quiz", p).map((a) => (
+                                  <td key={a.id} className="px-2 py-2 text-right">{cell(p_.scores[a.id])}</td>
+                                ))}
+                                {assessmentsInPeriod(assessments, "index", p).map((a) => (
+                                  <td key={a.id} className="px-2 py-2 text-right">{cell(p_.scores[a.id])}</td>
+                                ))}
+                                <td className="px-2 py-2 text-right font-semibold" style={{ color: STEEL }}>
+                                  {periodGrades[p].classStanding === null ? <span className="text-gray-300 font-normal">—</span> : periodGrades[p].classStanding.toFixed(1)}
+                                </td>
+                                <td className="px-2 py-2 text-right">{cell(p_.exams[p])}</td>
+                                <td className="px-2 py-2 text-right font-bold" style={{ color: PERIOD_COLORS[p] }}>
+                                  {periodGrades[p].total === null ? <span className="text-gray-300 font-normal">—</span> : periodGrades[p].total.toFixed(1)}
+                                </td>
+                              </Fragment>
+                            ))}
+                            <td className="px-3 py-2 text-right font-bold" style={{ color: NAVY, backgroundColor: "#FDF3DC" }}>
+                              {term === null ? "—" : `${term.toFixed(1)}%`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filtered.length === 0 && (
+                        <tr><td colSpan={26} className="text-center py-8 text-gray-300">No matches.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              )}
+              <p className="text-[11px] text-white/40">Tap any row to open and edit that student. Column headers update automatically if you rename or move items. Real names are only visible here in Instructor mode.</p>
+            </div>
+          );
+        })()}
+
+        {/* INSTRUCTOR EDIT */}
+        {view === "instructorEdit" && draft && (
+          <div className="space-y-3">
+            <button onClick={() => setView("instructorRoster")} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
+              <ChevronLeft size={14} /> Back to roster
+            </button>
+            <div className="bg-white rounded-2xl p-5">
+              <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>Real Name <span className="font-normal text-gray-400">(instructor only — never shown to students)</span></label>
+              <input
+                value={draft.realName}
+                onChange={(e) => setDraft((d) => ({ ...d, realName: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 mb-3 text-sm outline-none"
+                style={{ borderColor: "#ddd" }}
+              />
+              <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>Code Name</label>
+              <input
+                value={draft.codeName}
+                onChange={(e) => setDraft((d) => ({ ...d, codeName: e.target.value }))}
+                className="w-full border rounded-lg px-3 py-2 mb-3 text-sm outline-none"
+                style={{ borderColor: "#ddd" }}
+              />
+              <label className="block text-xs font-semibold mb-1" style={{ color: NAVY }}>
+                PIN <span className="font-normal text-gray-400">(hashed & encrypted — {roster.some((s) => s.id === draft.id) ? "leave blank to keep the current PIN" : "6 digits recommended"})</span>
+              </label>
+              <input
+                value={draft.pin}
+                onChange={(e) => setDraft((d) => ({ ...d, pin: e.target.value }))}
+                placeholder={roster.some((s) => s.id === draft.id) ? "•••••• (unchanged)" : "e.g. 482913"}
+                maxLength={6}
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none"
+                style={{ borderColor: "#ddd" }}
+              />
+            </div>
+
+            {[0, 1, 2].map((p) => (
+              <div key={p} className="bg-white rounded-2xl p-5">
+                <div className="text-xs font-bold tracking-wide mb-3" style={{ color: PERIOD_COLORS[p] }}>{PERIODS[p].toUpperCase()} PERIOD (%)</div>
+                {assessmentsInPeriod(assessments, "quiz", p).map((a) => (
+                  <div key={a.id} className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-gray-600">{a.label}</span>
+                    <input
+                      type="number" min="0" max="100"
+                      value={draft.scores[a.id] ?? ""}
+                      onChange={(e) => updateDraftScore(a.id, e.target.value)}
+                      className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right outline-none"
+                      style={{ borderColor: "#ddd" }}
+                    />
+                  </div>
+                ))}
+                {assessmentsInPeriod(assessments, "index", p).map((a) => (
+                  <div key={a.id} className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-gray-600">{a.label}</span>
+                    <input
+                      type="number" min="0" max="100"
+                      value={draft.scores[a.id] ?? ""}
+                      onChange={(e) => updateDraftScore(a.id, e.target.value)}
+                      className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right outline-none"
+                      style={{ borderColor: "#ddd" }}
+                    />
+                  </div>
+                ))}
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-600">{EXAM_LABELS[p]} Exam</span>
+                  <input
+                    type="number" min="0" max="100"
+                    value={draft.exams[p] ?? ""}
+                    onChange={(e) => updateDraftExam(p, e.target.value)}
+                    className="w-20 border rounded-lg px-2 py-1.5 text-sm text-right outline-none"
+                    style={{ borderColor: "#ddd" }}
+                  />
+                </div>
+                {assessmentsInPeriod(assessments, "quiz", p).length === 0 && assessmentsInPeriod(assessments, "index", p).length === 0 && (
+                  <div className="text-xs text-gray-300 italic">No quizzes or IndEx currently assigned to this period.</div>
+                )}
+              </div>
+            ))}
+
+            {saveMsg && (
+              <div className="flex items-center gap-1.5 text-xs text-white bg-white/10 rounded-lg px-3 py-2">
+                <CheckCircle2 size={14} /> {saveMsg}
+              </div>
+            )}
+            <button onClick={saveDraft} disabled={saving} className="w-full rounded-lg py-3 font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: AMBER, color: NAVY }}>
+              <Save size={16} /> {saving ? "Saving…" : "Save Student"}
+            </button>
+          </div>
+        )}
+
+        <div className="text-center text-white/25 text-[10px] mt-8">Theory of Structures · First Semester 2026-2027</div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<GradeLookup />);
+</script>
+</body>
+</html>
