@@ -790,8 +790,14 @@ function GradeLookup() {
       try {
         const rRes = await window.storage.get(`ranks:${selectedClassForStudent}`, true);
         const parsed = rRes ? JSON.parse(rRes.value) : null;
-        if (parsed && parsed.rankMap && parsed.rankMap[codeMatch.id]) {
-          rankInfo = { rank: parsed.rankMap[codeMatch.id], total: parsed.total };
+        const entry = parsed && parsed.rankMap ? parsed.rankMap[codeMatch.id] : null;
+        if (entry !== null && entry !== undefined) {
+          // Old published format stored a plain number; new format stores {rank, rankEnd}.
+          if (typeof entry === "number") {
+            rankInfo = { rank: entry, rankEnd: entry, total: parsed.total };
+          } else {
+            rankInfo = { rank: entry.rank, rankEnd: entry.rankEnd, total: parsed.total };
+          }
         }
       } catch (e) {} // ranks not published yet - fine, just omit
 
@@ -1086,12 +1092,20 @@ function GradeLookup() {
         })
         .filter((x) => x.avgVal !== null);
       withAvg.sort((a, b) => b.avgVal - a.avgVal);
-      const rankMap = {};
+      const rawRank = {}; // studentId -> starting rank of its tie group
       let rank = 0, seen = 0, lastAvg = null;
       withAvg.forEach((x) => {
         seen++;
         if (x.avgVal !== lastAvg) { rank = seen; lastAvg = x.avgVal; }
-        rankMap[x.id] = rank;
+        rawRank[x.id] = rank;
+      });
+      // How many students share each starting rank, so ties can show as a range (e.g. "3rd-4th").
+      const rankCounts = {};
+      Object.values(rawRank).forEach((r) => { rankCounts[r] = (rankCounts[r] || 0) + 1; });
+      const rankMap = {};
+      Object.keys(rawRank).forEach((id) => {
+        const r = rawRank[id];
+        rankMap[id] = { rank: r, rankEnd: r + rankCounts[r] - 1 };
       });
       const payload = { rankMap, total: withAvg.length, publishedAt: new Date().toISOString() };
       await window.storage.set(`ranks:${currentClassId}`, JSON.stringify(payload), true);
@@ -1295,7 +1309,9 @@ function GradeLookup() {
                 {foundStudent.rank && (
                   <div className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 mb-2" style={{ backgroundColor: `${AMBER}22` }}>
                     <span className="text-xs font-bold" style={{ color: AMBER_DEEP }}>
-                      {ordinal(foundStudent.rank)} out of {foundStudent.total} in class
+                      {foundStudent.rankEnd && foundStudent.rankEnd !== foundStudent.rank
+                        ? `${ordinal(foundStudent.rank)}-${ordinal(foundStudent.rankEnd)}`
+                        : ordinal(foundStudent.rank)} out of {foundStudent.total} in class
                     </span>
                   </div>
                 )}
@@ -1709,9 +1725,9 @@ function GradeLookup() {
         {/* INSTRUCTOR DASHBOARD */}
         {view === "instructorDashboard" && (() => {
           const q = dashSearch.trim().toLowerCase();
-          const filtered = roster.filter(
-            (s) => !q || (names[s.id] || "").toLowerCase().includes(q) || s.codeName.toLowerCase().includes(q)
-          );
+          const filtered = roster
+            .filter((s) => !q || (names[s.id] || "").toLowerCase().includes(q) || s.codeName.toLowerCase().includes(q))
+            .sort((a, b) => (names[a.id] || a.codeName).localeCompare(names[b.id] || b.codeName));
           const cell = (v) => (v === null || v === undefined ? <span className="text-gray-300">—</span> : `${v}`);
           return (
             <div className="space-y-3">
