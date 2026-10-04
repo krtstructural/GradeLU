@@ -27,24 +27,64 @@ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylt-Hyjc00PgQp
    window.storage polyfill - talks to the Google Sheet via Apps Script
    instead of Claude's built-in storage. Same interface, so none of the
    app logic below needed to change.
+
+   IMPORTANT (data-safety): a key that genuinely does not exist throws an
+   error flagged `notFound`. ANY OTHER failure (network drop, Apps Script
+   timeout/quota, bad response) throws a normal error. The app must never
+   treat a normal error as "empty" and write defaults over real data.
    ===================================================================== */
+const SHEET_CELL_LIMIT = 49000; // Google Sheets allows 50,000 characters per cell
+
+function makeNotFoundError(key) {
+  const err = new Error("Key not found: " + key);
+  err.notFound = true;
+  return err;
+}
+function isNotFound(e) {
+  return !!(e && e.notFound);
+}
+
+async function fetchJSONWithRetry(url, options, attempts) {
+  const tries = attempts || 3;
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error("Server responded with status " + res.status);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 window.storage = {
   async get(key, shared) {
-    const res = await fetch(`${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    const data = await fetchJSONWithRetry(
+      `${APPS_SCRIPT_URL}?key=${encodeURIComponent(key)}`,
+      { cache: "no-store" }
+    );
+    if (data.error) {
+      if (/not.?found/i.test(String(data.error))) throw makeNotFoundError(key);
+      throw new Error(data.error);
+    }
     if (data.value === null || data.value === undefined || data.value === "") {
-      throw new Error("Key not found");
+      throw makeNotFoundError(key);
     }
     return { key, value: data.value, shared: !!shared };
   },
   async set(key, value, shared) {
-    const res = await fetch(APPS_SCRIPT_URL, {
+    if (typeof value === "string" && value.length > SHEET_CELL_LIMIT) {
+      throw new Error(`Data for "${key}" is too large for a single Google Sheets cell (${value.length} characters; limit is about 50,000).`);
+    }
+    // Writing the same key/value twice is harmless, so retrying a failed write is safe.
+    const data = await fetchJSONWithRetry(APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ key, value }),
     });
-    const data = await res.json();
     if (data.error) throw new Error(data.error);
     return { key, value, shared: !!shared };
   },
@@ -55,6 +95,18 @@ window.storage = {
     return { keys: [] };
   },
 };
+
+// Returns the stored value, or null ONLY when the key truly does not exist.
+// Any other failure is re-thrown so callers can abort instead of overwriting.
+async function getOrNull(key) {
+  try {
+    const r = await window.storage.get(key, true);
+    return r.value;
+  } catch (e) {
+    if (isNotFound(e)) return null;
+    throw e;
+  }
+}
 </script>
 
 <script type="text/plain" id="app-source">
@@ -96,8 +148,9 @@ const AMBER = "#F7C948";
 const AMBER_DEEP = "#F4A623";
 const STEEL = "#5C7DAA";
 // Instructor passcode is stored as a SHA-256 hash, never in plain text.
-// Current passcode: snorlaxatepikachu1996 — SAVE THIS SOMEWHERE DURABLE. Claude cannot recover it
-// from the hash if forgotten in a future conversation; ask Claude to set a new one instead.
+// The passcode itself is intentionally NOT written here - this file is public, so anything in a
+// comment is readable by anyone who views the page source. Keep the passcode somewhere private.
+// Claude cannot recover it from the hash; if it is forgotten, ask Claude to set a new one.
 const INSTRUCTOR_PASSCODE_HASH = "83601a69143cec3b0770d4c21ea908f1a48bbc0802ef9ac8cd44ee2af8232cc5";
 
 async function sha256Hex(text) {
@@ -534,53 +587,84 @@ function GradeLookup() {
   const [expandedId, setExpandedId] = useState(null);
   const [expandedImportRow, setExpandedImportRow] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [initError, setInitError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [rankMsg, setRankMsg] = useState("");
   const [publishingRanks, setPublishingRanks] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      let existingClasses = undefined;
-      try {
-        const clsRes = await window.storage.get("classes", true);
-        existingClasses = JSON.parse(clsRes.value);
-      } catch (e) {
-        existingClasses = undefined; // key not found (or any read issue) - treat as "not set up yet", not a fatal error
-      }
-      if (existingClasses !== undefined) {
-        setClasses(existingClasses);
+  // Loads the class list. DATA-SAFETY RULE: this function only ever WRITES when a key is
+  // confirmed to be genuinely missing. If a read fails for any other reason (network, Apps Script
+  // hiccup, bad response) it stops and shows a retry screen - it never writes "[]" or defaults.
+  async function initClasses() {
+    setInitError(null);
+    let existingClasses;
+    try {
+      const clsRes = await window.storage.get("classes", true);
+      const parsed = JSON.parse(clsRes.value);
+      if (!Array.isArray(parsed)) throw new Error("The saved class list is not in the expected format.");
+      existingClasses = parsed;
+    } catch (e) {
+      if (!isNotFound(e)) {
+        setInitError(e && e.message ? e.message : String(e));
         return;
       }
-      // No classes list yet - check for legacy single-class data (from before multi-class) to migrate.
+      existingClasses = undefined; // confirmed: no "classes" key exists yet
+    }
+
+    // Safety net: if the list is missing or empty, restore from the backup copy (if one exists)
+    // before ever treating this as a fresh start.
+    if (existingClasses === undefined || existingClasses.length === 0) {
       try {
-        let legacyRoster = null;
-        try {
-          const r = await window.storage.get("roster", true);
-          legacyRoster = r ? JSON.parse(r.value) : null;
-        } catch (e) {}
-        if (legacyRoster !== null) {
-          const classId = newId("cls");
-          const [aRes, wRes, nRes] = await Promise.all([
-            window.storage.get("assessments", true).catch(() => null),
-            window.storage.get("weightConfig", true).catch(() => null),
-            window.storage.get("names", true).catch(() => null),
-          ]);
-          await window.storage.set(`roster:${classId}`, JSON.stringify(legacyRoster), true);
-          await window.storage.set(`assessments:${classId}`, aRes ? aRes.value : JSON.stringify(DEFAULT_ASSESSMENTS), true);
-          await window.storage.set(`weightConfig:${classId}`, wRes ? wRes.value : JSON.stringify(DEFAULT_WEIGHT_CONFIG), true);
-          await window.storage.set(`names:${classId}`, nRes ? nRes.value : "{}", true);
-          const newClasses = [{ id: classId, name: "My Class" }];
-          await window.storage.set("classes", JSON.stringify(newClasses), true);
-          setClasses(newClasses);
-        } else {
-          await window.storage.set("classes", JSON.stringify([]), true);
-          setClasses([]);
+        const bVal = await getOrNull("classes_backup");
+        if (bVal) {
+          const backup = JSON.parse(bVal);
+          if (Array.isArray(backup) && backup.length > 0) {
+            await window.storage.set("classes", JSON.stringify(backup), true);
+            setClasses(backup);
+            return;
+          }
         }
       } catch (e) {
-        setLoadError(`Could not set up your class list (${e && e.message ? e.message : String(e)}). Try refreshing - your existing data has not been changed.`);
+        setInitError(e && e.message ? e.message : String(e));
+        return;
+      }
+    }
+
+    if (existingClasses !== undefined) {
+      setClasses(existingClasses);
+      return;
+    }
+
+    // No classes list yet - check for legacy single-class data (from before multi-class) to migrate.
+    try {
+      const legacyVal = await getOrNull("roster");
+      if (legacyVal !== null) {
+        const legacyRoster = JSON.parse(legacyVal);
+        const classId = newId("cls");
+        const [aVal, wVal, nVal] = await Promise.all([
+          getOrNull("assessments"),
+          getOrNull("weightConfig"),
+          getOrNull("names"),
+        ]);
+        await window.storage.set(`roster:${classId}`, JSON.stringify(legacyRoster), true);
+        await window.storage.set(`assessments:${classId}`, aVal !== null ? aVal : JSON.stringify(DEFAULT_ASSESSMENTS), true);
+        await window.storage.set(`weightConfig:${classId}`, wVal !== null ? wVal : JSON.stringify(DEFAULT_WEIGHT_CONFIG), true);
+        await window.storage.set(`names:${classId}`, nVal !== null ? nVal : "{}", true);
+        const newClasses = [{ id: classId, name: "My Class" }];
+        await window.storage.set("classes", JSON.stringify(newClasses), true);
+        await window.storage.set("classes_backup", JSON.stringify(newClasses), true).catch(() => {});
+        setClasses(newClasses);
+      } else {
+        await window.storage.set("classes", JSON.stringify([]), true);
         setClasses([]);
       }
-    })();
+    } catch (e) {
+      setInitError(e && e.message ? e.message : String(e));
+    }
+  }
+
+  useEffect(() => {
+    initClasses();
   }, []);
 
   useEffect(() => {
@@ -613,42 +697,52 @@ function GradeLookup() {
     return s;
   }
 
+  // Each persist* function writes FIRST and only updates on-screen state if the write succeeded,
+  // then reports success/failure so callers never show "Saved" for a write that didn't happen.
   async function persistRoster(next) {
-    setRoster(next);
     try {
       await window.storage.set(`roster:${currentClassId}`, JSON.stringify(next), true);
+      setRoster(next);
+      return true;
     } catch (e) {
-      setSaveMsg("Save failed — check your connection and try again.");
+      setSaveMsg(`Save failed — nothing was changed (${e && e.message ? e.message : "connection problem"}).`);
+      return false;
     }
   }
 
   async function persistAssessments(next) {
-    setAssessments(next);
     try {
       await window.storage.set(`assessments:${currentClassId}`, JSON.stringify(next), true);
+      setAssessments(next);
+      return true;
     } catch (e) {
-      setAssessMsg("Save failed — check your connection and try again.");
+      setAssessMsg(`Save failed — nothing was changed (${e && e.message ? e.message : "connection problem"}).`);
+      return false;
     }
   }
 
   async function persistWeightConfig(next) {
-    setWeightConfig(next);
     try {
       await window.storage.set(`weightConfig:${currentClassId}`, JSON.stringify(next), true);
+      setWeightConfig(next);
+      return true;
     } catch (e) {
-      setAssessMsg("Save failed — check your connection and try again.");
+      setAssessMsg(`Save failed — nothing was changed (${e && e.message ? e.message : "connection problem"}).`);
+      return false;
     }
   }
 
   // Loads (and migrates/seeds if needed) one class's data - assessments, weight config, and roster.
   // Used both when a student logs into a specific class and when the instructor selects one.
+  // DATA-SAFETY RULE: defaults are only seeded when a key is confirmed missing. Any other read
+  // failure THROWS, so the caller aborts instead of showing (and later saving) an empty roster.
   async function loadClassData(classId) {
-    let a = DEFAULT_ASSESSMENTS;
-    try {
-      const aRes = await window.storage.get(`assessments:${classId}`, true);
-      if (aRes) a = JSON.parse(aRes.value);
-      else await window.storage.set(`assessments:${classId}`, JSON.stringify(DEFAULT_ASSESSMENTS), true);
-    } catch (e) {
+    let a;
+    const aVal = await getOrNull(`assessments:${classId}`);
+    if (aVal !== null) {
+      a = JSON.parse(aVal);
+    } else {
+      a = DEFAULT_ASSESSMENTS;
       try { await window.storage.set(`assessments:${classId}`, JSON.stringify(DEFAULT_ASSESSMENTS), true); } catch (e2) {}
     }
     let needsAssessmentResave = false;
@@ -662,12 +756,12 @@ function GradeLookup() {
       try { await window.storage.set(`assessments:${classId}`, JSON.stringify(a), true); } catch (e) {}
     }
 
-    let wc = DEFAULT_WEIGHT_CONFIG;
-    try {
-      const wRes = await window.storage.get(`weightConfig:${classId}`, true);
-      if (wRes) wc = JSON.parse(wRes.value);
-      else await window.storage.set(`weightConfig:${classId}`, JSON.stringify(DEFAULT_WEIGHT_CONFIG), true);
-    } catch (e) {
+    let wc;
+    const wVal = await getOrNull(`weightConfig:${classId}`);
+    if (wVal !== null) {
+      wc = JSON.parse(wVal);
+    } else {
+      wc = DEFAULT_WEIGHT_CONFIG;
       try { await window.storage.set(`weightConfig:${classId}`, JSON.stringify(DEFAULT_WEIGHT_CONFIG), true); } catch (e2) {}
     }
     if (!wc.default) {
@@ -678,30 +772,21 @@ function GradeLookup() {
       try { await window.storage.set(`weightConfig:${classId}`, JSON.stringify(wc), true); } catch (e) {}
     }
 
-    let scrubbed = [];
-    try {
-      const res = await window.storage.get(`roster:${classId}`, true);
-      const raw = res ? JSON.parse(res.value) : [];
-      const migrated = raw.map(migrateStudent);
-      const hashed = await hashStudentPins(migrated);
-      scrubbed = hashed.map(({ realName, ...rest }) => rest);
-      if (JSON.stringify(hashed) !== JSON.stringify(raw)) {
-        try {
-          const namesMap = {};
-          hashed.forEach((s) => { if (s.realName) namesMap[s.id] = s.realName; });
-          const existingNames = await window.storage.get(`names:${classId}`, true).catch(() => null);
-          const mergedNames = existingNames ? { ...JSON.parse(existingNames.value), ...namesMap } : namesMap;
-          await window.storage.set(`names:${classId}`, JSON.stringify(mergedNames), true);
-          await window.storage.set(`roster:${classId}`, JSON.stringify(scrubbed), true);
-        } catch (e) {}
-      }
-    } catch (e) {
-      const msg = (e && e.message ? e.message : String(e)) || "";
-      const looksLikeMissingKey = /not.?found|404|no such key/i.test(msg);
-      scrubbed = [];
-      if (!looksLikeMissingKey) {
-        setLoadError(`Could not load this class's data (${msg || "unknown error"}). Try refreshing.`);
-      }
+    // Roster: a real read failure aborts the whole load (throws). Only a confirmed-missing key means "empty".
+    const rVal = await getOrNull(`roster:${classId}`);
+    const raw = rVal !== null ? JSON.parse(rVal) : [];
+    const migrated = raw.map(migrateStudent);
+    const hashed = await hashStudentPins(migrated);
+    const scrubbed = hashed.map(({ realName, ...rest }) => rest);
+    if (JSON.stringify(hashed) !== JSON.stringify(raw)) {
+      try {
+        const namesMap = {};
+        hashed.forEach((s) => { if (s.realName) namesMap[s.id] = s.realName; });
+        const existingNamesVal = await getOrNull(`names:${classId}`);
+        const mergedNames = existingNamesVal !== null ? { ...JSON.parse(existingNamesVal), ...namesMap } : namesMap;
+        await window.storage.set(`names:${classId}`, JSON.stringify(mergedNames), true);
+        await window.storage.set(`roster:${classId}`, JSON.stringify(scrubbed), true);
+      } catch (e) {}
     }
 
     setAssessments(a);
@@ -721,6 +806,7 @@ function GradeLookup() {
       await window.storage.set(`names:${classId}`, JSON.stringify({}), true);
       const nextClasses = [...classes, { id: classId, name: newClassName.trim() }];
       await window.storage.set("classes", JSON.stringify(nextClasses), true);
+      window.storage.set("classes_backup", JSON.stringify(nextClasses), true).catch(() => {});
       setClasses(nextClasses);
       setNewClassName("");
       await selectClassAsInstructor(classId);
@@ -732,55 +818,57 @@ function GradeLookup() {
 
   async function selectClassAsInstructor(classId) {
     setActionLoading(true);
-    await loadClassData(classId);
-    const namesMap = await loadNamesFor(classId);
-    setNames(namesMap);
-    const cache = await buildDecryptedCache(classId, instructorSecret);
-    setDecryptedCache(cache);
+    setLoadError(null);
     try {
-      const rRes = await window.storage.get(`ranks:${classId}`, true);
-      const parsed = rRes ? JSON.parse(rRes.value) : null;
-      setInstructorRankMap(parsed ? parsed.rankMap : {});
+      await loadClassData(classId);
+      const namesMap = await loadNamesFor(classId);
+      setNames(namesMap);
+      const cache = await buildDecryptedCache(classId, instructorSecret);
+      setDecryptedCache(cache);
+      try {
+        const rRes = await window.storage.get(`ranks:${classId}`, true);
+        const parsed = rRes ? JSON.parse(rRes.value) : null;
+        setInstructorRankMap(parsed ? parsed.rankMap : {});
+      } catch (e) {
+        setInstructorRankMap({});
+      }
+      setView("instructorRoster");
     } catch (e) {
-      setInstructorRankMap({});
+      setLoadError(`Couldn't load this class (${e && e.message ? e.message : "connection problem"}). Nothing was changed — please try again.`);
     }
     setActionLoading(false);
-    setView("instructorRoster");
   }
 
+  // Returns {} only when the names key is confirmed missing; real failures throw so we never
+  // save a partial/empty names map over the real one.
   async function loadNamesFor(classId) {
-    try {
-      const res = await window.storage.get(`names:${classId}`, true);
-      return res ? JSON.parse(res.value) : {};
-    } catch (e) {
-      return {};
-    }
+    const v = await getOrNull(`names:${classId}`);
+    return v !== null ? JSON.parse(v) : {};
   }
 
+  // Decrypts every student for the instructor. A failed ROSTER READ throws (abort). A student whose
+  // record can't be decrypted is simply left out of the cache, which blocks editing that student
+  // (see openEdit) instead of risking an overwrite with blanks.
   async function buildDecryptedCache(classId, secret) {
-    try {
-      const res = await window.storage.get(`roster:${classId}`, true);
-      const raw = res ? JSON.parse(res.value) : [];
-      const migrated = raw.map(migrateStudent);
-      const hashed = await hashStudentPins(migrated);
-      const wrapKey = await deriveWrapKey(secret, INSTRUCTOR_SALT);
-      const cache = {};
-      for (const s of hashed) {
-        if (s.encData) {
-          try {
-            const dek = await unwrapDEK(wrapKey, s.encInstructorKey);
-            cache[s.id] = await decryptJSON(dek, s.encData);
-          } catch (e) {
-            cache[s.id] = { exams: [null, null, null], scores: {} };
-          }
-        } else {
-          cache[s.id] = { exams: s.exams, scores: s.scores };
+    const rVal = await getOrNull(`roster:${classId}`);
+    const raw = rVal !== null ? JSON.parse(rVal) : [];
+    const migrated = raw.map(migrateStudent);
+    const hashed = await hashStudentPins(migrated);
+    const wrapKey = await deriveWrapKey(secret, INSTRUCTOR_SALT);
+    const cache = {};
+    for (const s of hashed) {
+      if (s.encData) {
+        try {
+          const dek = await unwrapDEK(wrapKey, s.encInstructorKey);
+          cache[s.id] = await decryptJSON(dek, s.encData);
+        } catch (e) {
+          // leave out - editing this student is blocked
         }
+      } else {
+        cache[s.id] = { exams: s.exams, scores: s.scores };
       }
-      return cache;
-    } catch (e) {
-      return {};
     }
+    return cache;
   }
 
 
@@ -796,12 +884,22 @@ function GradeLookup() {
       return;
     }
     setActionLoading(true);
+
+    // Step 1: load the data. A failure here is a connection problem, not a wrong code/PIN.
+    let hashed;
     try {
       await loadClassData(selectedClassForStudent);
-      const res = await window.storage.get(`roster:${selectedClassForStudent}`, true).catch(() => null);
-      const raw = res ? JSON.parse(res.value) : [];
-      const migrated = raw.map(migrateStudent);
-      const hashed = await hashStudentPins(migrated);
+      const rVal = await getOrNull(`roster:${selectedClassForStudent}`);
+      const raw = rVal !== null ? JSON.parse(rVal) : [];
+      hashed = await hashStudentPins(raw.map(migrateStudent));
+    } catch (e) {
+      setError("Couldn't reach the grade database right now. Please check your connection and try again.");
+      setActionLoading(false);
+      return;
+    }
+
+    // Step 2: check the credentials.
+    try {
       const codeMatch = hashed.find((s) => s.codeName.trim().toLowerCase() === codeInput.trim().toLowerCase());
       if (!codeMatch) throw new Error("no code match");
 
@@ -844,6 +942,11 @@ function GradeLookup() {
       return;
     }
     setInstructorSecret(passInput);
+    // Keep a fresh backup copy of the class list whenever the instructor signs in (only if it has classes).
+    if (classes && classes.length > 0) {
+      window.storage.set("classes_backup", JSON.stringify(classes), true).catch(() => {});
+    }
+    setLoadError(null);
     setView("instructorSelectClass");
   }
 
@@ -854,17 +957,25 @@ function GradeLookup() {
     setClassRanks(null);
     setCurrentClassId(null);
     setSelectedClassForStudent("");
+    setLoadError(null);
     setView("landing");
   }
 
   function openEdit(student) {
+    // Block editing a record we couldn't decrypt - saving would overwrite real scores with blanks.
+    if (student.encData && !decryptedCache[student.id]) {
+      alert("This student's record couldn't be decrypted, so editing is blocked to avoid overwriting their scores with blanks. Try logging out and back in as instructor.");
+      return;
+    }
     const p = plainOf(student);
     setDraft({ id: p.id, codeName: p.codeName, exams: [...p.exams], scores: { ...p.scores }, realName: names[p.id] || "", pin: "" });
+    setSaveMsg("");
     setView("instructorEdit");
   }
 
   function openNew() {
     setDraft({ id: newId("s"), codeName: "", exams: [null, null, null], scores: {}, realName: "", pin: "" });
+    setSaveMsg("");
     setView("instructorEdit");
   }
 
@@ -903,7 +1014,11 @@ function GradeLookup() {
       return;
     }
     const next = exists ? roster.map((s) => (s.id === finalStudent.id ? finalStudent : s)) : [...roster, finalStudent];
-    await persistRoster(next);
+    const ok = await persistRoster(next);
+    if (!ok) {
+      setSaving(false); // persistRoster already set the failure message
+      return;
+    }
     const nextCache = { ...decryptedCache, [finalStudent.id]: plainData };
     setDecryptedCache(nextCache);
     const nextNames = { ...names, [finalStudent.id]: draft.realName };
@@ -918,7 +1033,11 @@ function GradeLookup() {
 
   async function deleteStudent(id) {
     const next = roster.filter((s) => s.id !== id);
-    await persistRoster(next);
+    const ok = await persistRoster(next);
+    if (!ok) {
+      alert("Couldn't delete — the save failed, so nothing was changed. Please try again.");
+      return;
+    }
     const nextNames = { ...names };
     delete nextNames[id];
     setNames(nextNames);
@@ -959,7 +1078,9 @@ function GradeLookup() {
       const idx = next.findIndex((s) => s.codeName.trim().toLowerCase() === row.codeName.trim().toLowerCase());
       if (idx >= 0) {
         const existing = next[idx];
-        const existingPlain = nextCache[existing.id] || (existing.encData ? { exams: existing.exams || [null, null, null], scores: {} } : { exams: existing.exams, scores: existing.scores });
+        // Can't merge onto a record we couldn't decrypt - that would overwrite real scores with blanks.
+        if (existing.encData && !nextCache[existing.id]) { skipped++; continue; }
+        const existingPlain = nextCache[existing.id] || { exams: existing.exams, scores: existing.scores };
         const mergedScores = { ...existingPlain.scores };
         Object.keys(row.scores).forEach((k) => { if (row.scores[k] !== null) mergedScores[k] = row.scores[k]; });
         const mergedExams = existingPlain.exams.map((v, i) => (row.exams[i] !== null ? row.exams[i] : v));
@@ -1001,12 +1122,16 @@ function GradeLookup() {
         created++;
       }
     }
-    await persistRoster(next);
+    const ok = await persistRoster(next);
+    if (!ok) {
+      setImportMsg("Import failed — the save didn't go through, so nothing was changed. Please try again.");
+      return;
+    }
     setDecryptedCache(nextCache);
     setNames(nextNames);
     await saveNames(nextNames);
     await computeAndSaveRanks(next, nextCache);
-    setImportMsg(`Done — ${created} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing code name/PIN, or an encryption error)` : ""}.`);
+    setImportMsg(`Done — ${created} added, ${updated} updated${skipped ? `, ${skipped} skipped (missing code name/PIN, an undecryptable record, or an encryption error)` : ""}.`);
     setImportPreview(null);
     setImportText("");
     setExpandedImportRow(null);
@@ -1152,8 +1277,10 @@ function GradeLookup() {
       return;
     }
     const removedIds = assessments.filter((a) => !assessDraft.some((d) => d.id === a.id)).map((a) => a.id);
-    await persistAssessments(assessDraft);
-    await persistWeightConfig(weightDraft);
+    const okA = await persistAssessments(assessDraft);
+    if (!okA) return;
+    const okW = await persistWeightConfig(weightDraft);
+    if (!okW) return;
     if (removedIds.length > 0) {
       const wrapKey = await deriveWrapKey(instructorSecret, INSTRUCTOR_SALT);
       const nextCache = { ...decryptedCache };
@@ -1179,7 +1306,11 @@ function GradeLookup() {
           nextCache[s.id] = { exams: s.exams, scores };
         }
       }
-      await persistRoster(nextRoster);
+      const okR = await persistRoster(nextRoster);
+      if (!okR) {
+        setAssessMsg("The grading structure saved, but clearing the removed items' scores failed. Please try saving again.");
+        return;
+      }
       setDecryptedCache(nextCache);
       await computeAndSaveRanks(nextRoster, nextCache);
     } else {
@@ -1190,6 +1321,27 @@ function GradeLookup() {
   }
 
   const shellStyle = { background: `linear-gradient(160deg, ${NAVY} 0%, ${NAVY_DEEP} 100%)`, minHeight: "100%" };
+
+  // The class list couldn't be read. We stop here on purpose: nothing has been written or reset.
+  if (initError) {
+    return (
+      <div className="flex items-center justify-center min-h-screen px-4" style={shellStyle}>
+        <div className="w-full max-w-md bg-white rounded-2xl p-6 text-center">
+          <div className="flex justify-center mb-3"><ShieldAlert size={28} color={NAVY} /></div>
+          <h2 className="font-bold text-lg mb-2" style={{ color: NAVY }}>Couldn't load the grade database</h2>
+          <p className="text-xs text-gray-500 mb-1">This is usually a temporary connection problem. Your saved data has not been changed.</p>
+          <p className="text-[11px] text-gray-400 mb-4 break-words">{initError}</p>
+          <button
+            onClick={() => { setClasses(null); initClasses(); }}
+            className="w-full rounded-lg py-3 font-bold text-sm"
+            style={{ backgroundColor: NAVY, color: "white" }}
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (classes === null) {
     return (
@@ -1497,6 +1649,12 @@ function GradeLookup() {
             <button onClick={goToLanding} className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80">
               <ChevronLeft size={14} /> Log out
             </button>
+            {loadError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+                <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-red-700">{loadError}</p>
+              </div>
+            )}
             <div className="bg-white rounded-2xl p-5">
               <div className="text-sm font-bold mb-3" style={{ color: NAVY }}>Your Classes</div>
               <div className="space-y-2 mb-4">
